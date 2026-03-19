@@ -553,8 +553,8 @@ function handleGetStudentList(params) {
     </div>
   </transition>
 
-  <!-- 頂部導覽列列 (全域工具) -->
-  <div class="fixed top-4 right-4 z-[80] flex gap-2">
+  <!-- 頂部導覽列列 (全域工具) - 智慧隱藏功能 -->
+  <div v-if="showGlobalTools" class="fixed top-4 right-4 z-[80] flex gap-2">
     <button @click="showInfo = true" class="w-12 h-12 bg-white text-dopa-yellow border-2 border-dopa-yellow rounded-full shadow-lg hover:scale-110 transition flex items-center justify-center text-xl">ℹ️</button>
     <button @click="showSettings = true" class="w-12 h-12 bg-white text-dopa-blue border-2 border-dopa-blue rounded-full shadow-lg hover:scale-110 transition flex items-center justify-center text-xl">⚙️</button>
   </div>
@@ -1230,7 +1230,7 @@ function handleGetStudentList(params) {
 
   // 預設密碼參數設定區塊 (優先權最低)
   // 👇 請將您的 GAS 網址貼在下方的雙引號 "" 裡面 👇
-  const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbx4wCbEdChxoGea2gYMx4MJv6jA4oe0PyKKkzUfPTHJJmnCuEYwx1qLGyOUcu2Z-3Ed/exec"; 
+  const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbx4wCbEdChxoGea2gYMx4MJv6jA4oe0PyKKkzUfPTHJJmnCuEYwx1qLGyOUcu2Z-3Ed/exechttps://is.gd/R44cId"; 
 
   const app = createApp({
     setup() {
@@ -1243,6 +1243,9 @@ function handleGetStudentList(params) {
       const shareShortUrl = ref('');
       const shareQrCode = ref('');
       const gasRawCode = ref('');
+
+      // 檢查是否使用硬編碼網址
+      const isHardcodedUrl = computed(() => DEFAULT_GAS_URL && DEFAULT_GAS_URL.trim() !== "");
 
       // 自訂 Modal 狀態
       const modal = reactive({ show: false, title: '', message: '', type: 'info', onConfirm: null });
@@ -1262,6 +1265,12 @@ function handleGetStudentList(params) {
       const isLoading = ref(false);
       const loginForm = reactive({ account: '', password: '' });
       const currentUser = ref({ role: '', name: '', id: '' });
+
+      // 如果設定了硬編碼，只有老師登入後才能看到全域工具 (齒輪/說明)
+      const showGlobalTools = computed(() => {
+        if (!isHardcodedUrl.value) return true;
+        return isLoggedIn.value && currentUser.value.role === 'teacher';
+      });
 
       // --- 頁籤狀態 (依角色區分) ---
       const studentTabs = [
@@ -1958,7 +1967,8 @@ function handleGetStudentList(params) {
         teacherTotalVeg, teacherTotalFruit, teacherTotalExercise, teacherTotalScreen, teacherWaterCount,
         teacherStudentViewMode, teacherSelectedWeek, teacherDetailWeeksList, teacherAggregatedStats, fetchStudentList, batchStudentText, submitBatchStudents,
         screenLabels, screenIcons, showDietEncourage, dietEncourageMsg, totalVeg, totalFruit, totalExerciseDuration, totalScreenTime, isScreenFullyFilled, waterCount,
-        checkDietGoal, checkExerciseGoal, checkScreenGoal, calculateSleepDuration, addExercise, toggleWater, handleImageUpload, saveData
+        checkDietGoal, checkExerciseGoal, checkScreenGoal, calculateSleepDuration, addExercise, toggleWater, handleImageUpload, saveData,
+        showGlobalTools, isHardcodedUrl
       };
     }
   });
