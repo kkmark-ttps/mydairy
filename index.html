@@ -1,0 +1,1969 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多巴胺健康日誌 💖</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts: Noto Sans TC -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            dopa: { pink: '#FFA6D9', yellow: '#FFE066', green: '#98DDCA', blue: '#A9DEF9', purple: '#D4B2D8', orange: '#FFB347' },
+            paper: '#FDFBF7'
+          },
+          fontFamily: { sans: ['"Noto Sans TC"', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #FDFBF7;
+      /* 紙質紋理與圓點背景 */
+      background-image: 
+        radial-gradient(#E5D9C5 1px, transparent 1px),
+        url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+      background-size: 20px 20px, 100% 100%;
+      color: #5A4A42;
+    }
+    .dopa-card {
+      background: rgba(255, 255, 255, 0.9);
+      border: 3px solid;
+      border-radius: 20px;
+      box-shadow: 4px 6px 0px rgba(0,0,0,0.05);
+      backdrop-filter: blur(5px);
+      transition: all 0.2s ease;
+    }
+    .dopa-card:hover { transform: translateY(-2px); box-shadow: 6px 8px 0px rgba(0,0,0,0.08); }
+    
+    /* 自訂卷軸 */
+    ::-webkit-scrollbar { height: 8px; width: 8px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb { background: #FFA6D9; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #FF85CB; }
+
+    /* Modal 動畫 */
+    .modal-enter-active, .modal-leave-active { transition: opacity 0.3s ease; }
+    .modal-enter-from, .modal-leave-to { opacity: 0; }
+    .modal-scale-enter-active { transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    .modal-scale-leave-active { transition: all 0.2s ease-in; }
+    .modal-scale-enter-from, .modal-scale-leave-to { transform: scale(0.9); opacity: 0; }
+  </style>
+</head>
+<body class="antialiased min-h-screen pb-20">
+
+<!-- 內嵌的 GAS 後端程式碼 (隱藏區塊，供複製使用) -->
+<script type="text/plain" id="gas-backend-code">
+/**
+ * 部署為 Web App
+ * 權限請設定為「所有人 (Anyone)」
+ */
+function doPost(e) {
+  try {
+    initSheets(); // 每次請求自動檢查並初始化工作表
+    
+    // 解決 CORS 預檢請求的技巧，前端以 text/plain 發送 JSON 字串
+    var params = JSON.parse(e.postData.contents);
+    var action = params.action;
+    
+    if (action === 'login') return handleLogin(params);
+    if (action === 'saveRecord') return handleSaveRecord(params);
+    if (action === 'getRecord') return handleGetRecord(params);
+    if (action === 'getStudentStats') return handleGetStudentStats(params);
+    if (action === 'getClassData') return handleGetClassData(params);
+    if (action === 'getClassStats') return handleGetClassStats(params);
+    if (action === 'getStudentList') return handleGetStudentList(params);
+    if (action === 'addStudents') return handleAddStudents(params);
+    
+    return jsonResponse({ success: false, message: '未知的操作指令' });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.toString() });
+  }
+}
+
+function doGet(e) {
+  return ContentService.createTextOutput("多巴胺健康日誌 API 運作中！請使用 POST 方法存取。");
+}
+
+function jsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 輔助函數：將試算表的日期轉回 YYYY-MM-DD 字串以利比對 (強化時區與格式處理)
+function formatDateStr(val) {
+  if (!val) return "";
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, SpreadsheetApp.getActive().getSpreadsheetTimeZone(), "yyyy-MM-dd");
+  }
+  var str = String(val).replace(/^'/, '').trim();
+  if (str.length >= 10) return str.substring(0, 10);
+  return str;
+}
+
+// 輔助函數：將試算表的睡眠時間強迫轉為 HH:mm 字串
+function formatTimeStr(val) {
+  if (!val) return "";
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, SpreadsheetApp.getActive().getSpreadsheetTimeZone(), "HH:mm");
+  }
+  return String(val).replace(/^'/, '').trim();
+}
+
+// 自動初始化工作表與中文欄位
+function initSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 初始化學生資料表
+  var userSheet = ss.getSheetByName('學生資料');
+  if (!userSheet) {
+    userSheet = ss.insertSheet('學生資料');
+    userSheet.appendRow(['學號', '密碼', '姓名', '權限角色']);
+    userSheet.appendRow(['teacher', '1234', '導師', 'teacher']);
+    userSheet.appendRow(['student', '1234', '測試學生', 'student']);
+  } else {
+    var data = userSheet.getDataRange().getValues();
+    var hasTeacher = false;
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === 'teacher') {
+        hasTeacher = true; 
+        break;
+      }
+    }
+    if (!hasTeacher) {
+      userSheet.appendRow(['teacher', '1234', '導師', 'teacher']);
+    }
+  }
+  
+  // 初始化每日紀錄表
+  var recordSheet = ss.getSheetByName('每日紀錄');
+  if (!recordSheet) {
+    recordSheet = ss.insertSheet('每日紀錄');
+    recordSheet.appendRow([
+      '時間戳記', '日期', '學號', 
+      '早餐蔬菜', '早餐水果', '午餐蔬菜', '午餐水果', '晚餐蔬菜', '晚餐水果',
+      '睡覺時間', '起床時間', '睡眠總評', '睡不著做什麼', '睡得好做什麼',
+      '運動一', '運動一時間', '運動二', '運動二時間', '運動三', '運動三時間',
+      '運動四', '運動四時間', '運動五', '運動五時間', '運動六', '運動六時間',
+      '運動七', '運動七時間',
+      '看電視(分)', '用電腦(分)', '滑平板(分)', '玩手機(分)',
+      '喝水杯數', '開心的事情', '自訂目標', '達成圖片(Base64)'
+    ]);
+  }
+}
+
+function handleLogin(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('學生資料');
+  var data = sheet.getDataRange().getValues();
+  
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] == params.account && data[i][1] == params.password) {
+      return jsonResponse({ 
+        success: true, 
+        user: { id: data[i][0], name: data[i][2], role: data[i][3] || 'student' } 
+      });
+    }
+  }
+  return jsonResponse({ success: false, message: '帳號或密碼錯誤！' });
+}
+
+function handleAddStudents(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('學生資料');
+  var newStudents = params.students;
+  var existingData = sheet.getDataRange().getValues();
+  var existingIds = [];
+  for (var k = 1; k < existingData.length; k++) {
+    existingIds.push(String(existingData[k][0]).trim());
+  }
+
+  var addedCount = 0;
+  for (var i = 0; i < newStudents.length; i++) {
+    var s = newStudents[i];
+    var sId = String(s.id).trim();
+    if (sId && existingIds.indexOf(sId) === -1) {
+      sheet.appendRow([sId, '1234', s.name, 'student']);
+      existingIds.push(sId); // 避免同批次有重複
+      addedCount++;
+    }
+  }
+  return jsonResponse({ success: true, message: '成功新增 ' + addedCount + ' 位學生！(預設密碼皆為 1234，若已存在會自動略過)' });
+}
+
+function handleSaveRecord(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('每日紀錄');
+  var data = sheet.getDataRange().getValues();
+  var rowIndex = -1;
+  
+  var targetDate = String(params.date).trim();
+  var targetUserId = String(params.userId).trim();
+
+  for (var i = data.length - 1; i >= 1; i--) {
+    var sheetDate = formatDateStr(data[i][1]);
+    var sheetUserId = String(data[i][2]).trim();
+    if (sheetDate === targetDate && sheetUserId === targetUserId) {
+      rowIndex = i + 1;
+      break;
+    }
+  }
+  
+  var r = params.record;
+  var rowData = [
+    new Date(), 
+    "'" + targetDate, 
+    targetUserId,
+    r.diet.breakfast.veg, r.diet.breakfast.fruit,
+    r.diet.lunch.veg, r.diet.lunch.fruit,
+    r.diet.dinner.veg, r.diet.dinner.fruit,
+    (r.sleep.start ? "'" + r.sleep.start : ""),
+    (r.sleep.end ? "'" + r.sleep.end : ""),
+    '', r.sleep.cantSleepNote, r.sleep.sleptWellNote,
+    r.exercises[0]?.type || '', r.exercises[0]?.duration || '',
+    r.exercises[1]?.type || '', r.exercises[1]?.duration || '',
+    r.exercises[2]?.type || '', r.exercises[2]?.duration || '',
+    r.exercises[3]?.type || '', r.exercises[3]?.duration || '',
+    r.exercises[4]?.type || '', r.exercises[4]?.duration || '',
+    r.exercises[5]?.type || '', r.exercises[5]?.duration || '',
+    r.exercises[6]?.type || '', r.exercises[6]?.duration || '',
+    r.screen.tv, r.screen.pc, r.screen.tablet, r.screen.phone,
+    r.water, r.moodText, r.customGoal || '', r.photoBase64 || ''
+  ];
+  
+  if (rowIndex > -1) {
+    sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+  
+  SpreadsheetApp.flush();
+  return jsonResponse({ success: true, message: '儲存成功！' });
+}
+
+function handleGetRecord(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('每日紀錄');
+  var data = sheet.getDataRange().getValues();
+  var targetDate = String(params.date).trim();
+  var targetUserId = String(params.userId).trim();
+  
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (formatDateStr(data[i][1]) === targetDate && String(data[i][2]).trim() === targetUserId) {
+      var row = data[i];
+      return jsonResponse({
+        success: true,
+        record: {
+          diet: { 
+            breakfast: { veg: row[3] || 0, fruit: row[4] || 0 }, 
+            lunch: { veg: row[5] || 0, fruit: row[6] || 0 }, 
+            dinner: { veg: row[7] || 0, fruit: row[8] || 0 } 
+          },
+          sleep: { start: formatTimeStr(row[9]), end: formatTimeStr(row[10]), cantSleepNote: row[12], sleptWellNote: row[13] },
+          exercises: [
+            { type: row[14], duration: row[15] },
+            { type: row[16], duration: row[17] },
+            { type: row[18], duration: row[19] },
+            { type: row[20], duration: row[21] },
+            { type: row[22], duration: row[23] },
+            { type: row[24], duration: row[25] },
+            { type: row[26], duration: row[27] }
+          ].filter(e => e.type),
+          screen: { tv: row[28], pc: row[29], tablet: row[30], phone: row[31] },
+          water: row[32] || 0,
+          moodText: row[33] || '',
+          customGoal: row[34] || '',
+          photoBase64: row[35] || ''
+        }
+      });
+    }
+  }
+  return jsonResponse({ success: true, record: null });
+}
+
+function handleGetStudentStats(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('每日紀錄');
+  var data = sheet.getDataRange().getValues();
+  var stats = [];
+  var targetUserId = String(params.userId).trim();
+  
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][2]).trim() === targetUserId) {
+      var waterVal = data[i][32];
+      var waterCount = 0;
+      if (waterVal) {
+        if (typeof waterVal === 'string' && waterVal.includes(',')) {
+          waterCount = waterVal.split(',').filter(function(x) { return x === 'true'; }).length;
+        } else {
+          waterCount = Number(waterVal) || 0;
+        }
+      }
+      
+      var exTime = (Number(data[i][15]) || 0) + (Number(data[i][17]) || 0) + (Number(data[i][19]) || 0) +
+                   (Number(data[i][21]) || 0) + (Number(data[i][23]) || 0) + (Number(data[i][25]) || 0) + (Number(data[i][27]) || 0);
+                   
+      var scTime = (Number(data[i][28]) || 0) + (Number(data[i][29]) || 0) + (Number(data[i][30]) || 0) + (Number(data[i][31]) || 0);
+      var veg = (Number(data[i][3]) || 0) + (Number(data[i][5]) || 0) + (Number(data[i][7]) || 0);
+      var fruit = (Number(data[i][4]) || 0) + (Number(data[i][6]) || 0) + (Number(data[i][8]) || 0);
+
+      stats.push({
+        date: formatDateStr(data[i][1]), // YYYY-MM-DD
+        water: waterCount * 250,
+        exercise: exTime,
+        screen: scTime,
+        veg: veg,
+        fruit: fruit
+      });
+    }
+  }
+  
+  stats.sort(function(a, b) { return new Date(a.date) - new Date(b.date); });
+  return jsonResponse({ success: true, stats: stats });
+}
+
+function handleGetClassData(params) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var userSheet = ss.getSheetByName('學生資料');
+  var recordSheet = ss.getSheetByName('每日紀錄');
+
+  var users = userSheet.getDataRange().getValues();
+  var records = recordSheet.getDataRange().getValues();
+  var targetDate = String(params.date).trim();
+
+  var students = [];
+  for (var i = 1; i < users.length; i++) {
+    if (String(users[i][3]).trim() === 'student') {
+      students.push({ id: String(users[i][0]).trim(), name: users[i][2], data: null });
+    }
+  }
+
+  var dateRecords = {};
+  for (var j = 1; j < records.length; j++) {
+    if (formatDateStr(records[j][1]) === targetDate) {
+      var r = records[j];
+      var wVal = r[32];
+      var wCount = 0;
+      if (wVal) {
+        if (typeof wVal === 'string' && wVal.includes(',')) {
+          wCount = wVal.split(',').filter(function(x){return x==='true'}).length;
+        } else {
+          wCount = Number(wVal) || 0;
+        }
+      }
+      
+      var exTime = (Number(r[15])||0) + (Number(r[17])||0) + (Number(r[19])||0) + (Number(r[21])||0) + (Number(r[23])||0) + (Number(r[25])||0) + (Number(r[27])||0);
+      var scTime = (Number(r[28])||0) + (Number(r[29])||0) + (Number(r[30])||0) + (Number(r[31])||0);
+
+      var sId = String(r[2]).trim();
+      dateRecords[sId] = {
+        veg: (Number(r[3])||0)+(Number(r[5])||0)+(Number(r[7])||0),
+        fruit: (Number(r[4])||0)+(Number(r[6])||0)+(Number(r[8])||0),
+        exercise: exTime,
+        screen: scTime,
+        water: wCount * 250
+      };
+    }
+  }
+
+  for (var k = 0; k < students.length; k++) {
+    var checkId = students[k].id;
+    if (dateRecords[checkId]) {
+      students[k].data = dateRecords[checkId];
+    }
+  }
+
+  return jsonResponse({ success: true, list: students });
+}
+
+function handleGetClassStats(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('每日紀錄');
+  var data = sheet.getDataRange().getValues();
+  var dateGroups = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var date = formatDateStr(data[i][1]);
+    if (!dateGroups[date]) {
+      dateGroups[date] = { count: 0, waterTotal: 0, exerciseTotal: 0, screenTotal: 0 };
+    }
+
+    var wVal = data[i][32];
+    var wCount = 0;
+    if (wVal) {
+      if (typeof wVal === 'string' && wVal.includes(',')) {
+        wCount = wVal.split(',').filter(function(x){return x==='true'}).length;
+      } else {
+        wCount = Number(wVal) || 0;
+      }
+    }
+
+    var exTime = (Number(data[i][15])||0) + (Number(data[i][17])||0) + (Number(data[i][19])||0) + (Number(data[i][21])||0) + (Number(data[i][23])||0) + (Number(data[i][25])||0) + (Number(data[i][27])||0);
+    var scTime = (Number(data[i][28])||0) + (Number(data[i][29])||0) + (Number(data[i][30])||0) + (Number(data[i][31])||0);
+
+    dateGroups[date].count++;
+    dateGroups[date].waterTotal += (wCount * 250);
+    dateGroups[date].exerciseTotal += exTime;
+    dateGroups[date].screenTotal += scTime;
+  }
+
+  var stats = [];
+  for (var d in dateGroups) {
+    var g = dateGroups[d];
+    stats.push({
+      date: d,
+      avgWater: Math.round(g.waterTotal / g.count),
+      avgExercise: Math.round(g.exerciseTotal / g.count),
+      avgScreen: Math.round(g.screenTotal / g.count)
+    });
+  }
+
+  stats.sort(function(a, b) { return new Date(a.date) - new Date(b.date); });
+  return jsonResponse({ success: true, stats: stats });
+}
+
+function handleGetStudentList(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('學生資料');
+  var data = sheet.getDataRange().getValues();
+  var list = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][3]).trim() === 'student') {
+      list.push({ id: String(data[i][0]).trim(), name: data[i][2] });
+    }
+  }
+  return jsonResponse({ success: true, list: list });
+}
+</script>
+
+<div id="app">
+  
+  <!-- ================= 自訂彈出視窗 (Modal) ================= -->
+  <transition name="modal">
+    <div v-if="modal.show" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <transition name="modal-scale" appear>
+        <div class="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-full shadow-2xl relative border-4 border-dopa-pink">
+          <div class="text-center">
+            <div class="text-5xl mb-4" v-if="modal.type === 'success'">✅</div>
+            <div class="text-5xl mb-4" v-if="modal.type === 'error'">❌</div>
+            <div class="text-5xl mb-4" v-if="modal.type === 'info'">💡</div>
+            <div class="text-5xl mb-4" v-if="modal.type === 'confirm'">❓</div>
+            <h3 class="text-2xl font-black mb-2 text-gray-800">{{ modal.title }}</h3>
+            <p class="text-gray-600 font-bold mb-6 whitespace-pre-line">{{ modal.message }}</p>
+            
+            <div class="flex gap-3 justify-center">
+              <button v-if="modal.type === 'confirm'" @click="modalCancel" class="px-6 py-2 rounded-xl bg-gray-200 text-gray-700 font-bold hover:bg-gray-300 transition">
+                取消
+              </button>
+              <button @click="modalConfirm" class="px-6 py-2 rounded-xl text-white font-bold transition shadow-md hover:scale-105"
+                :class="modal.type === 'error' ? 'bg-red-400' : 'bg-dopa-pink'">
+                確定
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </div>
+  </transition>
+
+  <!-- ================= 設定視窗 ================= -->
+  <transition name="modal">
+    <div v-if="showSettings" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <transition name="modal-scale" appear>
+        <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border-4 border-dopa-blue max-h-[90vh] overflow-y-auto">
+          <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-black text-gray-800 flex items-center gap-2"><i class="fa-solid fa-gear text-dopa-blue"></i> 系統設定</h2>
+            <button @click="showSettings = false" class="text-gray-400 hover:text-gray-600 text-2xl"><i class="fa-solid fa-times"></i></button>
+          </div>
+          
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-bold text-gray-600 mb-2">GAS 部署 API 網址 (Web App URL)</label>
+              <input type="password" v-model="tempGasUrl" placeholder="https://script.google.com/macros/s/.../exec"
+                class="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-dopa-blue focus:ring-0 transition">
+              <p class="text-xs text-gray-400 mt-1">請輸入您部署的 Google Apps Script 網址。</p>
+            </div>
+            
+            <div class="flex gap-2">
+              <button @click="saveSettings" class="flex-1 py-3 bg-dopa-blue text-blue-900 font-black rounded-xl hover:bg-blue-300 transition shadow">
+                💾 儲存設定
+              </button>
+              <button @click="clearSettings" class="px-4 py-3 bg-red-100 text-red-600 font-bold rounded-xl hover:bg-red-200 transition">
+                清除重置
+              </button>
+            </div>
+          </div>
+
+          <!-- 分享區塊 -->
+          <div class="mt-8 border-t-2 border-dashed border-gray-200 pt-6" v-if="gasUrl">
+            <h3 class="font-black text-gray-700 mb-3 flex items-center gap-2"><i class="fa-solid fa-share-nodes text-dopa-green"></i> 產生分享連結</h3>
+            <button @click="generateShareLink" :disabled="isGeneratingLink" class="w-full py-3 bg-dopa-green text-green-900 font-bold rounded-xl hover:bg-green-300 transition flex justify-center items-center gap-2">
+              <i class="fa-solid fa-wand-magic-sparkles" v-if="!isGeneratingLink"></i>
+              <i class="fa-solid fa-spinner fa-spin" v-else></i>
+              {{ isGeneratingLink ? '產生中...' : '建立專屬短網址與 QR Code' }}
+            </button>
+            
+            <div v-if="shareShortUrl" class="mt-4 p-4 bg-gray-50 rounded-xl text-center">
+              <p class="text-sm font-bold text-gray-600 mb-2">分享連結 (若為長網址表示短網址服務忙碌)</p>
+              <input type="text" readonly :value="shareShortUrl" class="w-full p-2 bg-white border border-gray-200 rounded text-center text-sm font-bold text-dopa-blue mb-3">
+              <img :src="shareQrCode" alt="QR Code" class="mx-auto w-40 h-40 border-4 border-white rounded-xl shadow-sm">
+            </div>
+          </div>
+        </div>
+      </transition>
+    </div>
+  </transition>
+
+  <!-- ================= 說明視窗 (GAS 程式碼) ================= -->
+  <transition name="modal">
+    <div v-if="showInfo" class="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <transition name="modal-scale" appear>
+        <div class="bg-white rounded-3xl p-6 w-full max-w-2xl shadow-2xl border-4 border-dopa-yellow max-h-[90vh] flex flex-col">
+          <div class="flex justify-between items-center mb-4 shrink-0">
+            <h2 class="text-2xl font-black text-gray-800 flex items-center gap-2">ℹ️ 部署說明與 GAS 程式碼</h2>
+            <button @click="showInfo = false" class="text-gray-400 hover:text-gray-600 text-2xl"><i class="fa-solid fa-times"></i></button>
+          </div>
+          
+          <div class="overflow-y-auto custom-scrollbar flex-1 pr-2">
+            <ol class="list-decimal list-inside space-y-2 text-sm font-bold text-gray-700 mb-4 bg-yellow-50 p-4 rounded-xl">
+              <li>點擊下方按鈕複製所有程式碼。</li>
+              <li>前往 <a href="https://script.google.com" target="_blank" class="text-blue-500 underline">Google Apps Script</a> 新增專案並貼上。</li>
+              <li>點擊右上角「部署」 > 「新增部署作業」。</li>
+              <li>類型選擇「網頁應用程式」，權限設定為<strong class="text-red-500">「所有人」</strong>，點擊部署。</li>
+              <li>複製部署後的網址，回到此網頁點擊右上角「⚙️ 設定」貼上網址。</li>
+            </ol>
+            
+            <div class="relative">
+              <button @click="copyGasCode" class="absolute top-2 right-2 px-3 py-1 bg-gray-800 text-white text-xs font-bold rounded-lg hover:bg-gray-700 transition">
+                📋 複製程式碼
+              </button>
+              <textarea readonly class="w-full h-64 p-4 bg-gray-900 text-green-400 font-mono text-xs rounded-xl focus:outline-none" :value="gasRawCode"></textarea>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </div>
+  </transition>
+
+  <!-- 頂部導覽列列 (全域工具) -->
+  <div class="fixed top-4 right-4 z-[80] flex gap-2">
+    <button @click="showInfo = true" class="w-12 h-12 bg-white text-dopa-yellow border-2 border-dopa-yellow rounded-full shadow-lg hover:scale-110 transition flex items-center justify-center text-xl">ℹ️</button>
+    <button @click="showSettings = true" class="w-12 h-12 bg-white text-dopa-blue border-2 border-dopa-blue rounded-full shadow-lg hover:scale-110 transition flex items-center justify-center text-xl">⚙️</button>
+  </div>
+
+  <!-- ================= 登入介面 ================= -->
+  <div v-if="!isLoggedIn" class="min-h-screen flex flex-col items-center justify-center px-4">
+    <div class="max-w-md w-full dopa-card border-dopa-pink p-8 relative overflow-hidden">
+      <div class="absolute -top-10 -right-10 w-32 h-32 bg-dopa-yellow rounded-full opacity-30"></div>
+      <div class="absolute -bottom-10 -left-10 w-32 h-32 bg-dopa-blue rounded-full opacity-30"></div>
+      
+      <div class="relative z-10 text-center mb-8">
+        <h1 class="text-4xl font-black text-gray-800 mb-2 tracking-wide">
+          健康日記 <span class="text-dopa-pink">♥</span>
+        </h1>
+        <p class="text-gray-500 font-bold">2026 春季版 (3月-5月)</p>
+      </div>
+
+      <form @submit.prevent="login" class="relative z-10 space-y-5">
+        <div>
+          <label class="block text-sm font-bold text-gray-600 mb-1">學號 / 帳號</label>
+          <input v-model="loginForm.account" type="text" required
+            class="w-full px-4 py-3 rounded-xl border-2 border-pink-100 focus:border-dopa-pink focus:ring-0 transition-all font-bold bg-white/50"
+            placeholder="輸入學號 | 老師請填: teacher">
+        </div>
+        <div>
+          <label class="block text-sm font-bold text-gray-600 mb-1">密碼</label>
+          <input v-model="loginForm.password" type="password" required
+            class="w-full px-4 py-3 rounded-xl border-2 border-pink-100 focus:border-dopa-pink focus:ring-0 transition-all font-bold bg-white/50"
+            placeholder="輸入密碼 (預設: 1234)">
+        </div>
+        <button type="submit" :disabled="isLoading"
+          class="w-full py-3 bg-dopa-pink text-white font-black text-lg rounded-xl shadow-md hover:shadow-lg hover:-translate-y-1 transition-all flex justify-center items-center gap-2">
+          <i class="fa-solid fa-spinner fa-spin" v-if="isLoading"></i>
+          {{ isLoading ? '連線中...' : '開心地登入！ 🚀' }}
+        </button>
+      </form>
+    </div>
+    
+    <div v-if="!gasUrl" class="mt-6 text-center text-red-500 font-bold max-w-md bg-red-50 p-4 rounded-xl border border-red-200">
+      ⚠️ 尚未設定 API 網址！<br>請點擊右上角 ⚙️ 進行設定。
+    </div>
+  </div>
+
+  <!-- ================= 應用程式主體 ================= -->
+  <div v-else class="max-w-4xl mx-auto pt-6 px-4">
+    
+    <!-- 個人資訊列 -->
+    <nav class="flex flex-wrap justify-between items-center mb-6 dopa-card border-gray-100 p-4">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-full flex items-center justify-center text-white font-black text-xl shadow-inner"
+             :class="currentUser.role === 'teacher' ? 'bg-dopa-blue' : 'bg-dopa-pink'">
+          {{ currentUser.role === 'teacher' ? '👩‍🏫' : '👦' }}
+        </div>
+        <div>
+          <h2 class="font-black text-xl text-gray-800">Hi, {{ currentUser.name }}!</h2>
+          <p class="text-sm text-gray-500 font-bold">{{ currentUser.role === 'teacher' ? '導師管理面板' : '今天也要元氣滿滿喔！' }}</p>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4 sm:mt-0">
+        <button @click="logout" class="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition shadow-sm">
+          登出
+        </button>
+      </div>
+    </nav>
+
+    <!-- 頁籤 (動態：依據身分顯示) -->
+    <div class="flex space-x-3 overflow-x-auto custom-scrollbar pb-3 mb-4">
+      <template v-if="currentUser.role === 'student'">
+        <button v-for="tab in studentTabs" :key="tab.id" 
+          @click="activeTab = tab.id"
+          :class="['px-6 py-3 rounded-2xl font-black whitespace-nowrap transition-all border-2', 
+                  activeTab === tab.id ? tab.color + ' border-transparent shadow-md transform scale-105' : 'bg-white text-gray-400 border-gray-100 hover:bg-gray-50']">
+          {{ tab.name }}
+        </button>
+      </template>
+      <template v-else-if="currentUser.role === 'teacher'">
+        <button v-for="tab in teacherTabs" :key="tab.id" 
+          @click="activeTab = tab.id"
+          :class="['px-6 py-3 rounded-2xl font-black whitespace-nowrap transition-all border-2', 
+                  activeTab === tab.id ? tab.color + ' border-transparent shadow-md transform scale-105' : 'bg-white text-gray-400 border-gray-100 hover:bg-gray-50']">
+          {{ tab.name }}
+        </button>
+      </template>
+    </div>
+
+    <!-- ====== 學生視角：紀錄表 ====== -->
+    <div v-if="currentUser.role === 'student' && ['mar', 'apr', 'may'].includes(activeTab)">
+      
+      <!-- 日期捲軸 -->
+      <div class="dopa-card border-gray-100 p-3 mb-6 flex overflow-x-auto custom-scrollbar gap-2 items-center">
+        <button v-for="day in daysInActiveMonth" :key="day.date"
+          @click="selectDate(day.date)"
+          :class="['min-w-[4.5rem] flex flex-col items-center p-3 rounded-2xl transition-all border-2',
+                   selectedDate === day.date ? 'bg-dopa-pink text-white border-transparent shadow-lg transform -translate-y-1' : 'bg-white border-pink-50 hover:bg-pink-50 text-gray-500']">
+          <span class="text-xs font-bold mb-1">{{ day.weekName }}</span>
+          <span class="text-2xl font-black">{{ day.dayNum }}</span>
+          <!-- 本地快取提示圓點 -->
+          <div v-if="localCache[day.date]" class="w-2 h-2 rounded-full mt-1" :class="selectedDate === day.date ? 'bg-white' : 'bg-dopa-green'"></div>
+        </button>
+      </div>
+
+      <!-- 讀取中遮罩 -->
+      <div v-if="isLoadingData" class="py-20 text-center">
+        <i class="fa-solid fa-spinner fa-spin text-4xl text-dopa-pink mb-4"></i>
+        <p class="font-bold text-gray-500">翻閱日記本中...</p>
+      </div>
+
+      <div v-else-if="currentRecord" class="space-y-6">
+        
+        <!-- 1. 蔬果紀錄 (改為輸入數量) -->
+        <div class="dopa-card border-dopa-green p-6 relative overflow-hidden">
+          <div class="absolute -right-4 -top-4 text-6xl opacity-20">🥦</div>
+          <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-green-800">
+            🥦 今天吃蔬果了嗎？ <span class="text-sm font-bold text-gray-500 bg-white/50 px-2 rounded-full">(目標：3樣蔬菜、2樣水果)</span>
+          </h3>
+          
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- 早餐 -->
+            <div class="p-4 rounded-2xl border-2 border-green-100 bg-white hover:border-green-300 transition-all">
+              <h4 class="font-black text-green-800 mb-3 text-center bg-green-50 rounded-xl py-1">🌅 早餐</h4>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-gray-600">🥦 蔬菜 (樣)</span>
+                  <input type="number" v-model="currentRecord.diet.breakfast.veg" @input="checkDietGoal" min="0" class="w-20 p-2 text-center bg-green-50 border border-green-200 rounded-xl font-black text-green-700 focus:outline-none focus:ring-2 ring-green-300">
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-gray-600">🍎 水果 (樣)</span>
+                  <input type="number" v-model="currentRecord.diet.breakfast.fruit" @input="checkDietGoal" min="0" class="w-20 p-2 text-center bg-red-50 border border-red-200 rounded-xl font-black text-red-700 focus:outline-none focus:ring-2 ring-red-300">
+                </div>
+              </div>
+            </div>
+            
+            <!-- 午餐 -->
+            <div class="p-4 rounded-2xl border-2 border-green-100 bg-white hover:border-green-300 transition-all">
+              <h4 class="font-black text-green-800 mb-3 text-center bg-green-50 rounded-xl py-1">☀️ 午餐</h4>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-gray-600">🥦 蔬菜 (樣)</span>
+                  <input type="number" v-model="currentRecord.diet.lunch.veg" @input="checkDietGoal" min="0" class="w-20 p-2 text-center bg-green-50 border border-green-200 rounded-xl font-black text-green-700 focus:outline-none focus:ring-2 ring-green-300">
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-gray-600">🍎 水果 (樣)</span>
+                  <input type="number" v-model="currentRecord.diet.lunch.fruit" @input="checkDietGoal" min="0" class="w-20 p-2 text-center bg-red-50 border border-red-200 rounded-xl font-black text-red-700 focus:outline-none focus:ring-2 ring-red-300">
+                </div>
+              </div>
+            </div>
+
+            <!-- 晚餐 -->
+            <div class="p-4 rounded-2xl border-2 border-green-100 bg-white hover:border-green-300 transition-all">
+              <h4 class="font-black text-green-800 mb-3 text-center bg-green-50 rounded-xl py-1">🌙 晚餐</h4>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-gray-600">🥦 蔬菜 (樣)</span>
+                  <input type="number" v-model="currentRecord.diet.dinner.veg" @input="checkDietGoal" min="0" class="w-20 p-2 text-center bg-green-50 border border-green-200 rounded-xl font-black text-green-700 focus:outline-none focus:ring-2 ring-green-300">
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-gray-600">🍎 水果 (樣)</span>
+                  <input type="number" v-model="currentRecord.diet.dinner.fruit" @input="checkDietGoal" min="0" class="w-20 p-2 text-center bg-red-50 border border-red-200 rounded-xl font-black text-red-700 focus:outline-none focus:ring-2 ring-red-300">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 達成度提示 -->
+          <div class="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold bg-white p-3 rounded-xl border border-gray-100">
+             <div :class="totalVeg >= 3 ? 'text-green-600' : 'text-gray-500'" class="flex items-center gap-1">
+               <i class="fa-solid fa-check" v-if="totalVeg >= 3"></i> 目前蔬菜：{{ totalVeg }} / 3 樣
+             </div>
+             <div :class="totalFruit >= 2 ? 'text-red-500' : 'text-gray-500'" class="flex items-center gap-1">
+               <i class="fa-solid fa-check" v-if="totalFruit >= 2"></i> 目前水果：{{ totalFruit }} / 2 樣
+             </div>
+          </div>
+
+          <transition name="modal-scale">
+            <div v-if="showDietEncourage" class="mt-4 p-4 bg-yellow-100 border-2 border-dopa-yellow rounded-2xl text-center font-black text-xl text-yellow-700 shadow-sm flex items-center justify-center gap-2">
+              ✨ {{ dietEncourageMsg }} ✨
+            </div>
+          </transition>
+        </div>
+
+        <!-- 2. 睡眠紀錄 -->
+        <div class="dopa-card border-dopa-purple p-6">
+          <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-purple-800">🌙 睡眠充電站</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div class="bg-purple-50 p-4 rounded-2xl border border-purple-100">
+              <label class="block text-sm font-bold text-purple-600 mb-2">上床睡覺時間</label>
+              <input type="time" v-model="currentRecord.sleep.start" class="w-full p-2 bg-white rounded-xl font-bold text-gray-700 focus:outline-none focus:ring-2 ring-dopa-purple">
+            </div>
+            <div class="bg-purple-50 p-4 rounded-2xl border border-purple-100">
+              <label class="block text-sm font-bold text-purple-600 mb-2">起床清醒時間</label>
+              <input type="time" v-model="currentRecord.sleep.end" class="w-full p-2 bg-white rounded-xl font-bold text-gray-700 focus:outline-none focus:ring-2 ring-dopa-purple">
+            </div>
+            <div class="md:col-span-2 flex items-center justify-center bg-white border-2 border-dopa-purple p-3 rounded-2xl shadow-sm">
+              <span class="font-bold text-purple-800">⚡ 總睡眠時間：</span>
+              <span class="ml-2 font-black text-2xl text-purple-600">{{ calculateSleepDuration() }}</span>
+            </div>
+            <div class="md:col-span-2">
+              <label class="block text-sm font-bold text-gray-600 mb-2">😩 睡不著時，我做了什麼？</label>
+              <input type="text" v-model="currentRecord.sleep.cantSleepNote" class="w-full p-3 bg-white border-2 border-gray-100 rounded-xl font-bold" placeholder="例如：聽輕音樂、數羊...">
+            </div>
+            <div class="md:col-span-2">
+              <label class="block text-sm font-bold text-gray-600 mb-2">🥰 做了什麼讓我今天睡得比較久/好？</label>
+              <input type="text" v-model="currentRecord.sleep.sleptWellNote" class="w-full p-3 bg-white border-2 border-gray-100 rounded-xl font-bold" placeholder="例如：白天有去跑步...">
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 運動紀錄 -->
+        <div class="dopa-card border-dopa-orange p-6">
+          <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-orange-800">
+            🏃‍♀️ 活力運動紀錄 <span class="text-sm font-bold text-gray-500 bg-white/50 px-2 rounded-full">(目標：60分鐘放彩帶！)</span>
+          </h3>
+          <div class="space-y-3">
+            <div v-for="(exercise, index) in currentRecord.exercises" :key="index" class="flex flex-wrap sm:flex-nowrap gap-2 items-center bg-orange-50 p-3 rounded-2xl border border-orange-100">
+              <input type="text" v-model="exercise.type" placeholder="做了什麼運動？" class="flex-1 p-2 bg-white rounded-xl font-bold border border-orange-200">
+              <div class="flex items-center gap-2">
+                <input type="number" v-model="exercise.duration" @input="checkExerciseGoal" placeholder="0" class="w-20 p-2 bg-white rounded-xl font-bold text-center border border-orange-200">
+                <span class="font-bold text-orange-800">分鐘</span>
+              </div>
+            </div>
+            <button @click="addExercise" v-if="currentRecord.exercises.length < 7" class="w-full py-3 border-2 border-dashed border-dopa-orange text-orange-600 font-bold rounded-2xl hover:bg-orange-50 transition">
+              <i class="fa-solid fa-plus mr-1"></i> 再加一項運動 (最多 7 項)
+            </button>
+          </div>
+
+          <!-- 運動達成度提示 -->
+          <div class="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold bg-white p-3 rounded-xl border border-gray-100">
+             <div :class="totalExerciseDuration >= 60 ? 'text-orange-600' : 'text-gray-500'" class="flex items-center gap-1">
+               <i class="fa-solid fa-check" v-if="totalExerciseDuration >= 60"></i> 目前總運動時間：{{ totalExerciseDuration }} / 60 分鐘
+             </div>
+          </div>
+        </div>
+
+        <!-- 4. 看四電紀錄 -->
+        <div class="dopa-card border-dopa-blue p-6">
+          <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-blue-800">📺 四電紀錄 (螢幕時間)</h3>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div v-for="(val, key) in screenLabels" :key="key" 
+              class="flex flex-col items-center justify-center p-4 rounded-2xl border-2 border-gray-100 bg-white hover:border-blue-200 transition-all">
+              <i class="fa-solid text-3xl mb-2 text-blue-500" :class="screenIcons[key]"></i>
+              <span class="font-bold text-gray-600 mb-2">{{ val }}</span>
+              <div class="flex items-center gap-1">
+                <input type="number" v-model="currentRecord.screen[key]" @input="checkScreenGoal" min="0" class="w-20 p-2 text-center bg-blue-50 border border-blue-100 rounded-xl font-black text-blue-800 focus:outline-none focus:ring-2 ring-blue-300" placeholder="0">
+                <span class="text-xs font-bold text-gray-500">分鐘</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 螢幕時間達成度提示 -->
+          <div class="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold bg-white p-3 rounded-xl border border-gray-100">
+             <div v-if="!isScreenFullyFilled" class="text-gray-500 flex items-center gap-1">
+               <i class="fa-solid fa-pen"></i> 請填妥四個項目的時間 (若無請填 0)
+             </div>
+             <div v-else-if="totalScreenTime > 120" class="text-red-500 flex items-center gap-1">
+               <i class="fa-solid fa-triangle-exclamation"></i> 目前總計：{{ totalScreenTime }} 分鐘 (超過 2 小時，請注意眼睛休息喔！)
+             </div>
+             <div v-else class="text-green-600 flex items-center gap-1">
+               <i class="fa-solid fa-check"></i> 目前總計：{{ totalScreenTime }} 分鐘 (控制在 2 小時內，很棒喔！)
+             </div>
+          </div>
+        </div>
+
+        <!-- 5. 喝水紀錄 -->
+        <div class="dopa-card border-[#80E5FF] p-6 bg-gradient-to-b from-white to-[#E6F9FF]">
+          <h3 class="text-xl font-black flex items-center justify-between mb-4 text-[#0099CC]">
+            <span>💧 喝水補給站 <span class="text-sm font-bold bg-white px-2 rounded-full">(目標 1500cc 放煙火！)</span></span>
+            <span class="text-2xl font-black">{{ waterCount * 250 }} cc</span>
+          </h3>
+          <div class="grid grid-cols-4 sm:grid-cols-6 gap-3 bg-white p-4 rounded-2xl shadow-inner border border-[#B3F0FF]">
+            <div v-for="(isDrunk, index) in currentRecord.water" :key="index" class="flex flex-col items-center gap-1 cursor-pointer group" @click="toggleWater(index)">
+              <div class="text-3xl transition-all duration-300 transform group-hover:scale-110"
+                :class="isDrunk ? 'opacity-100 -translate-y-1 drop-shadow-md' : 'opacity-30 grayscale group-hover:grayscale-0'">
+                🥛
+              </div>
+              <span class="text-[10px] font-bold" :class="isDrunk ? 'text-[#0099CC]' : 'text-gray-400'">250cc</span>
+            </div>
+          </div>
+
+          <!-- 喝水達成度提示 -->
+          <div class="mt-4 flex flex-wrap justify-center gap-4 text-sm font-bold bg-white p-3 rounded-xl border border-gray-100">
+             <div v-if="waterCount < 6" class="text-red-500 flex items-center gap-1">
+               <i class="fa-solid fa-triangle-exclamation"></i> 目前喝水量：{{ waterCount * 250 }} cc (還不到 1500cc，請多喝水！)
+             </div>
+             <div v-else class="text-[#0099CC] flex items-center gap-1">
+               <i class="fa-solid fa-check"></i> 目前喝水量：{{ waterCount * 250 }} cc (達標！水分補充很充足！)
+             </div>
+          </div>
+        </div>
+
+        <!-- 6. 心情與照片上傳 -->
+        <div class="dopa-card border-dopa-yellow p-6 relative">
+          <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-yellow-800">😊 今天讓我開心的小事與照片</h3>
+          <textarea v-model="currentRecord.moodText" rows="3" 
+            class="w-full p-4 bg-yellow-50 border-2 border-yellow-200 rounded-2xl font-bold focus:outline-none focus:border-dopa-yellow resize-none mb-4"
+            placeholder="記錄一下今天發生的好事，讓多巴胺分泌一下吧！"></textarea>
+            
+          <!-- 圖片上傳 (前端壓縮轉 Base64) -->
+          <div class="border-2 border-dashed border-yellow-300 rounded-2xl p-4 text-center bg-white hover:bg-yellow-50 transition cursor-pointer relative" @click="$refs.fileInput.click()">
+            <input type="file" ref="fileInput" accept="image/*" class="hidden" @change="handleImageUpload">
+            <div v-if="!currentRecord.photoBase64">
+              <i class="fa-solid fa-camera text-3xl text-yellow-400 mb-2"></i>
+              <p class="font-bold text-yellow-700 text-sm">點擊上傳今日照片 (自動壓縮)</p>
+            </div>
+            <div v-else class="relative inline-block">
+              <img :src="currentRecord.photoBase64" class="max-h-40 rounded-xl mx-auto shadow">
+              <button @click.stop="currentRecord.photoBase64 = ''" class="absolute -top-3 -right-3 w-8 h-8 bg-red-500 text-white rounded-full font-bold shadow-md hover:bg-red-600">×</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 儲存按鈕 -->
+        <div class="sticky bottom-6 z-50 pt-4">
+          <button @click="saveData" :disabled="isSaving" class="w-full py-4 bg-gray-800 text-white font-black text-xl rounded-2xl shadow-xl hover:shadow-2xl hover:-translate-y-1 transition-all flex justify-center items-center gap-2">
+            <i class="fa-solid fa-spinner fa-spin" v-if="isSaving"></i>
+            {{ isSaving ? '努力儲存中...' : '💾 儲存今日日記' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 學生視角：統計趨勢圖 ====== -->
+    <div v-else-if="currentUser.role === 'student' && activeTab === 'stats'">
+      <div class="dopa-card border-dopa-blue p-6 relative overflow-hidden min-h-[400px]">
+        <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-blue-800">
+          📈 近期健康趨勢 <span class="text-sm font-bold text-gray-500 bg-white/50 px-2 rounded-full">(最多顯示最近 14 筆打卡)</span>
+        </h3>
+        
+        <div v-if="isLoadingData" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm rounded-xl">
+          <i class="fa-solid fa-spinner fa-spin text-4xl text-dopa-blue mb-4"></i>
+          <p class="font-bold text-gray-500">正在努力畫圖表...</p>
+        </div>
+
+        <div class="h-[350px] w-full relative">
+          <canvas id="studentTrendChart"></canvas>
+        </div>
+        
+        <div v-if="!isLoadingData && trendDataLength === 0" class="absolute inset-0 z-20 flex items-center justify-center">
+          <p class="font-bold text-gray-500 bg-gray-50 px-6 py-3 rounded-2xl border-2 border-dashed border-gray-200">
+            目前還沒有任何紀錄可以顯示喔！快去打卡並儲存幾天吧！🏃‍♂️
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 老師視角：班級每日打卡狀況 ====== -->
+    <div v-else-if="currentUser.role === 'teacher' && activeTab === 'daily'">
+      <div class="dopa-card border-dopa-green p-6 mb-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+        <h3 class="text-xl font-black flex items-center gap-2 text-green-800">
+          📅 選擇觀看日期：
+        </h3>
+        <div class="flex items-center gap-2">
+          <input type="date" v-model="teacherSelectedDate" @change="fetchClassDailyData" class="p-3 border-2 border-green-200 rounded-xl font-bold text-green-800 bg-green-50 focus:outline-none focus:ring-2 ring-green-400">
+          <button @click="fetchClassDailyData" class="px-4 py-3 bg-green-100 text-green-800 font-bold rounded-xl hover:bg-green-200 transition shadow-sm flex items-center gap-2">
+            <i class="fa-solid fa-arrows-rotate" :class="{'fa-spin': isLoadingData}"></i> 重整
+          </button>
+        </div>
+      </div>
+
+      <div class="dopa-card border-gray-200 p-6 relative min-h-[300px]">
+        <h3 class="text-xl font-black mb-4 text-gray-700">👨‍🎓 學生紀錄列表 ({{ teacherSelectedDate }})</h3>
+        
+        <div v-if="isLoadingData" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm rounded-xl">
+          <i class="fa-solid fa-spinner fa-spin text-4xl text-dopa-green mb-4"></i>
+          <p class="font-bold text-gray-500">正在讀取班級資料...</p>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-gray-100">
+          <table class="w-full text-left border-collapse whitespace-nowrap">
+            <thead>
+              <tr class="bg-gray-50 text-gray-600 font-bold border-b-2 border-gray-100">
+                <th class="p-4">學號</th>
+                <th class="p-4">姓名</th>
+                <th class="p-4 text-center">打卡狀態</th>
+                <th class="p-4 text-center">運動時間</th>
+                <th class="p-4 text-center">螢幕時間</th>
+                <th class="p-4 text-center">喝水量</th>
+                <th class="p-4 text-center">蔬果 (菜/果)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!isLoadingData && classDailyRecords.length === 0">
+                <td colspan="7" class="p-8 text-center text-gray-400 font-bold">這天還沒有任何人打卡喔！</td>
+              </tr>
+              <tr class="border-b border-gray-50 hover:bg-blue-50 transition" v-for="student in classDailyRecords" :key="student.id">
+                <td class="p-4 font-black text-gray-700">{{ student.id }}</td>
+                <td class="p-4 font-bold text-gray-700">{{ student.name }}</td>
+                <td class="p-4 text-center">
+                  <span v-if="student.data" class="text-green-500 font-bold bg-green-100 px-3 py-1 rounded-full"><i class="fa-solid fa-check mr-1"></i>已打卡</span>
+                  <span v-else class="text-gray-400 font-bold bg-gray-100 px-3 py-1 rounded-full"><i class="fa-solid fa-xmark mr-1"></i>未打卡</span>
+                </td>
+                <td class="p-4 text-center font-bold" :class="!student.data ? 'text-gray-400' : (student.data.exercise >= 60 ? 'text-blue-600' : 'text-red-500')">
+                  {{ student.data ? student.data.exercise + ' 分' : '-' }}
+                </td>
+                <td class="p-4 text-center font-bold" :class="!student.data ? 'text-gray-400' : (student.data.screen <= 120 ? 'text-blue-600' : 'text-red-500')">
+                  {{ student.data ? student.data.screen + ' 分' : '-' }}
+                </td>
+                <td class="p-4 text-center font-bold" :class="!student.data ? 'text-gray-400' : (student.data.water >= 1500 ? 'text-blue-600' : 'text-red-500')">
+                  {{ student.data ? student.data.water + ' cc' : '-' }}
+                </td>
+                <td class="p-4 text-center font-bold" :class="!student.data ? 'text-gray-400' : (student.data.veg >= 3 && student.data.fruit >= 2 ? 'text-blue-600' : 'text-red-500')">
+                  {{ student.data ? student.data.veg + ' / ' + student.data.fruit : '-' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 老師視角：單一學生狀況 ====== -->
+    <div v-else-if="currentUser.role === 'teacher' && activeTab === 'studentDetail'">
+      
+      <!-- 選擇器與檢視模式切換 -->
+      <div class="dopa-card border-dopa-orange p-5 mb-6 bg-orange-50 space-y-4">
+        <div class="flex flex-col sm:flex-row gap-4 justify-between items-center">
+          <div class="flex items-center gap-2">
+            <span class="font-black text-orange-800 text-lg whitespace-nowrap">👤 選擇學生：</span>
+            <select v-model="teacherSelectedStudentId" class="p-3 w-40 sm:w-auto rounded-xl border-2 border-orange-200 font-bold focus:outline-none focus:ring-2 ring-orange-400 bg-white">
+               <option value="" disabled>請選擇學生...</option>
+               <option v-for="s in studentList" :key="s.id" :value="s.id">{{ s.id }} - {{ s.name }}</option>
+            </select>
+            <button @click="fetchStudentList" class="p-3 bg-white border-2 border-orange-200 text-orange-500 rounded-xl hover:bg-orange-100 transition shadow-sm" title="重新載入名單">
+               <i class="fa-solid fa-arrows-rotate" :class="{'fa-spin': isLoadingData}"></i>
+            </button>
+          </div>
+          <div class="flex gap-2">
+            <button v-for="m in [{id:'mar', n:'3月'}, {id:'apr', n:'4月'}, {id:'may', n:'5月'}]" :key="m.id"
+                    @click="teacherDetailMonth = m.id"
+                    :class="teacherDetailMonth === m.id ? 'bg-dopa-orange text-white shadow-md transform scale-105' : 'bg-white text-orange-800 border border-orange-200 hover:bg-orange-100'"
+                    class="px-5 py-2 rounded-xl font-black transition-all">
+              {{ m.n }}
+            </button>
+          </div>
+        </div>
+        
+        <!-- 模式切換：日 / 週 / 月 -->
+        <div class="flex justify-center border-t border-orange-200 pt-4">
+           <div class="bg-white p-1 rounded-xl flex gap-1 shadow-sm border border-orange-100">
+             <button @click="teacherStudentViewMode = 'daily'" :class="teacherStudentViewMode === 'daily' ? 'bg-orange-100 text-orange-800' : 'text-gray-500 hover:bg-gray-50'" class="px-6 py-2 rounded-lg font-bold transition">📅 日檢視</button>
+             <button @click="teacherStudentViewMode = 'weekly'" :class="teacherStudentViewMode === 'weekly' ? 'bg-orange-100 text-orange-800' : 'text-gray-500 hover:bg-gray-50'" class="px-6 py-2 rounded-lg font-bold transition">📊 週趨勢</button>
+             <button @click="teacherStudentViewMode = 'monthly'" :class="teacherStudentViewMode === 'monthly' ? 'bg-orange-100 text-orange-800' : 'text-gray-500 hover:bg-gray-50'" class="px-6 py-2 rounded-lg font-bold transition">📈 月趨勢</button>
+           </div>
+        </div>
+      </div>
+
+      <!-- === 日檢視模式 === -->
+      <div v-if="teacherStudentViewMode === 'daily'">
+        <!-- 日期捲軸 -->
+        <div class="dopa-card border-gray-100 p-3 mb-6 flex overflow-x-auto custom-scrollbar gap-2 items-center">
+          <button v-for="day in teacherDetailDays" :key="day.date"
+            @click="selectTeacherDate(day.date)"
+            :class="['min-w-[4.5rem] flex flex-col items-center p-3 rounded-2xl transition-all border-2',
+                     teacherDetailDate === day.date ? 'bg-dopa-orange text-white border-transparent shadow-lg transform -translate-y-1' : 'bg-white border-orange-50 hover:bg-orange-50 text-gray-500']">
+            <span class="text-xs font-bold mb-1">{{ day.weekName }}</span>
+            <span class="text-2xl font-black">{{ day.dayNum }}</span>
+          </button>
+        </div>
+
+        <div v-if="isLoadingData" class="py-20 text-center">
+          <i class="fa-solid fa-spinner fa-spin text-4xl text-dopa-orange mb-4"></i>
+          <p class="font-bold text-gray-500">正在讀取學生日記...</p>
+        </div>
+
+        <div v-else-if="!teacherViewRecord" class="dopa-card p-12 text-center border-gray-200 bg-gray-50">
+          <i class="fa-solid fa-book-open text-5xl text-gray-300 mb-4"></i>
+          <p class="text-xl font-black text-gray-500">該名學生這天尚未填寫日記喔！</p>
+        </div>
+
+        <!-- 日檢視詳細資料 -->
+        <div v-else class="space-y-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+             <div class="dopa-card border-dopa-green p-6">
+               <h3 class="text-lg font-black text-green-800 mb-3"><i class="fa-solid fa-carrot"></i> 蔬果攝取</h3>
+               <div class="flex gap-4 mb-4">
+                  <div class="flex-1 bg-green-50 p-3 rounded-xl text-center border border-green-100">
+                    <p class="text-xs text-green-600 font-bold mb-1">蔬菜總數</p>
+                    <p class="text-2xl font-black text-green-700">{{ teacherTotalVeg }} <span class="text-sm">樣</span></p>
+                  </div>
+                  <div class="flex-1 bg-red-50 p-3 rounded-xl text-center border border-red-100">
+                    <p class="text-xs text-red-600 font-bold mb-1">水果總數</p>
+                    <p class="text-2xl font-black text-red-700">{{ teacherTotalFruit }} <span class="text-sm">樣</span></p>
+                  </div>
+               </div>
+               <p class="text-sm font-bold text-gray-600 bg-gray-50 p-3 rounded-xl text-center">
+                  早 (菜{{teacherViewRecord.diet.breakfast.veg}} 果{{teacherViewRecord.diet.breakfast.fruit}}) · 
+                  午 (菜{{teacherViewRecord.diet.lunch.veg}} 果{{teacherViewRecord.diet.lunch.fruit}}) · 
+                  晚 (菜{{teacherViewRecord.diet.dinner.veg}} 果{{teacherViewRecord.diet.dinner.fruit}})
+               </p>
+             </div>
+             
+             <div class="dopa-card border-[#80E5FF] p-6 flex flex-col justify-center">
+               <h3 class="text-lg font-black text-[#0099CC] mb-3"><i class="fa-solid fa-glass-water"></i> 喝水補給</h3>
+               <div class="flex items-center justify-center gap-6 bg-[#E6F9FF] p-6 rounded-xl border border-[#B3F0FF]">
+                  <div class="text-6xl">💧</div>
+                  <div>
+                     <p class="text-4xl font-black text-[#0099CC]">{{ teacherWaterCount * 250 }} <span class="text-xl">cc</span></p>
+                     <p class="text-sm font-bold text-[#007A99] mt-1">共喝了 {{ teacherWaterCount }} 杯水</p>
+                  </div>
+               </div>
+             </div>
+
+             <div class="dopa-card border-dopa-purple p-6">
+               <h3 class="text-lg font-black text-purple-800 mb-3"><i class="fa-solid fa-moon"></i> 睡眠狀況</h3>
+               <div class="bg-purple-50 p-4 rounded-xl mb-4 border border-purple-100">
+                  <p class="font-bold text-purple-700 flex justify-between items-center">
+                     <span>{{ teacherViewRecord.sleep.start }} ~ {{ teacherViewRecord.sleep.end }}</span>
+                     <span class="text-xl font-black text-purple-900 bg-white px-3 py-1 rounded-lg shadow-sm">{{ calcDuration(teacherViewRecord.sleep.start, teacherViewRecord.sleep.end) }}</span>
+                  </p>
+               </div>
+               <div class="text-sm space-y-3">
+                  <p class="bg-gray-50 p-3 rounded-xl"><span class="font-bold text-gray-500 block mb-1">😩 睡不著做什麼：</span> <span class="text-gray-700 font-bold">{{ teacherViewRecord.sleep.cantSleepNote || '無' }}</span></p>
+                  <p class="bg-gray-50 p-3 rounded-xl"><span class="font-bold text-gray-500 block mb-1">🥰 睡得好做什麼：</span> <span class="text-gray-700 font-bold">{{ teacherViewRecord.sleep.sleptWellNote || '無' }}</span></p>
+               </div>
+             </div>
+
+             <div class="dopa-card border-dopa-orange p-6">
+               <h3 class="text-lg font-black text-orange-800 mb-3 flex justify-between items-center">
+                  <span><i class="fa-solid fa-person-running"></i> 活力運動</span>
+                  <span class="text-2xl text-orange-600">{{ teacherTotalExercise }} <span class="text-sm">分鐘</span></span>
+               </h3>
+               <ul class="space-y-2 text-sm font-bold text-gray-600 bg-orange-50 p-4 rounded-xl border border-orange-100 min-h-[140px]">
+                  <li v-for="(ex, i) in teacherViewRecord.exercises.filter(e=>e.type)" :key="i" class="bg-white p-3 rounded-lg flex justify-between shadow-sm">
+                     <span>{{ ex.type }}</span>
+                     <span class="text-orange-700">{{ ex.duration }} 分鐘</span>
+                  </li>
+                  <li v-if="teacherViewRecord.exercises.filter(e=>e.type).length === 0" class="text-gray-400 text-center mt-4">當日無運動紀錄</li>
+               </ul>
+             </div>
+
+             <div class="dopa-card border-dopa-blue p-6 md:col-span-2">
+               <h3 class="text-lg font-black text-blue-800 mb-3 flex justify-between items-center">
+                  <span><i class="fa-solid fa-tv"></i> 螢幕時間 (四電)</span>
+                  <span class="text-2xl text-blue-600">{{ teacherTotalScreen }} <span class="text-sm">分鐘</span></span>
+               </h3>
+               <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center text-sm font-bold">
+                  <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                     <p class="text-gray-500 mb-1"><i class="fa-solid fa-tv mb-1 block text-2xl text-blue-300"></i>電視</p>
+                     <p class="text-2xl text-blue-700">{{ teacherViewRecord.screen.tv || 0 }}</p>
+                  </div>
+                  <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                     <p class="text-gray-500 mb-1"><i class="fa-solid fa-desktop mb-1 block text-2xl text-blue-300"></i>電腦</p>
+                     <p class="text-2xl text-blue-700">{{ teacherViewRecord.screen.pc || 0 }}</p>
+                  </div>
+                  <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                     <p class="text-gray-500 mb-1"><i class="fa-solid fa-tablet-screen-button mb-1 block text-2xl text-blue-300"></i>平板</p>
+                     <p class="text-2xl text-blue-700">{{ teacherViewRecord.screen.tablet || 0 }}</p>
+                  </div>
+                  <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                     <p class="text-gray-500 mb-1"><i class="fa-solid fa-mobile-screen mb-1 block text-2xl text-blue-300"></i>手機</p>
+                     <p class="text-2xl text-blue-700">{{ teacherViewRecord.screen.phone || 0 }}</p>
+                  </div>
+               </div>
+             </div>
+
+             <div class="dopa-card border-dopa-yellow p-6 md:col-span-2 flex flex-col md:flex-row gap-6">
+                <div class="flex-1">
+                   <h3 class="text-lg font-black text-yellow-800 mb-3"><i class="fa-solid fa-face-smile"></i> 開心的小事</h3>
+                   <div class="bg-yellow-50 p-5 rounded-xl text-gray-700 font-bold min-h-[120px] whitespace-pre-wrap border border-yellow-200">{{ teacherViewRecord.moodText || '這天沒有寫下開心的事情喔。' }}</div>
+                </div>
+                <div class="flex-1">
+                   <h3 class="text-lg font-black text-yellow-800 mb-3"><i class="fa-solid fa-camera"></i> 當日照片</h3>
+                   <div v-if="teacherViewRecord.photoBase64" class="text-center bg-gray-50 p-4 rounded-xl border border-gray-200">
+                      <img :src="teacherViewRecord.photoBase64" class="max-h-48 rounded-xl shadow-md mx-auto">
+                   </div>
+                   <div v-else class="bg-gray-50 p-4 rounded-xl text-gray-400 font-bold text-center h-[120px] flex items-center justify-center border border-gray-200">
+                      未上傳照片
+                   </div>
+                </div>
+             </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- === 週/月檢視模式 === -->
+      <div v-else>
+        
+        <div v-if="teacherStudentViewMode === 'weekly'" class="mb-4">
+           <select v-model="teacherSelectedWeek" class="p-3 rounded-xl border-2 border-orange-200 font-bold focus:outline-none focus:ring-2 ring-orange-400 bg-white">
+              <option v-for="(wk, idx) in teacherDetailWeeksList" :key="idx" :value="idx">{{ wk.label }}</option>
+           </select>
+        </div>
+
+        <div v-if="isLoadingData" class="py-20 text-center">
+          <i class="fa-solid fa-spinner fa-spin text-4xl text-dopa-orange mb-4"></i>
+          <p class="font-bold text-gray-500">正在統計資料...</p>
+        </div>
+
+        <div v-else-if="teacherAggregatedStats.days === 0" class="dopa-card p-12 text-center border-gray-200 bg-gray-50">
+          <i class="fa-solid fa-chart-bar text-5xl text-gray-300 mb-4"></i>
+          <p class="text-xl font-black text-gray-500">該時段內尚未有打卡資料。</p>
+        </div>
+
+        <div v-else class="space-y-6">
+          <!-- 統計卡片 -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+             <div class="dopa-card p-4 text-center border-orange-200 bg-orange-50">
+               <p class="text-xs font-bold text-orange-600 mb-1">平均運動 (分)</p>
+               <p class="text-2xl font-black text-orange-800">{{ teacherAggregatedStats.avgEx }}</p>
+             </div>
+             <div class="dopa-card p-4 text-center border-blue-200 bg-blue-50">
+               <p class="text-xs font-bold text-blue-600 mb-1">平均螢幕 (分)</p>
+               <p class="text-2xl font-black text-blue-800">{{ teacherAggregatedStats.avgSc }}</p>
+             </div>
+             <div class="dopa-card p-4 text-center border-[#B3F0FF] bg-[#E6F9FF]">
+               <p class="text-xs font-bold text-[#0099CC] mb-1">平均喝水 (cc)</p>
+               <p class="text-2xl font-black text-[#007A99]">{{ teacherAggregatedStats.avgWater }}</p>
+             </div>
+             <div class="dopa-card p-4 text-center border-green-200 bg-green-50">
+               <p class="text-xs font-bold text-green-600 mb-1">總蔬果 (菜/果)</p>
+               <p class="text-2xl font-black text-green-800">{{ teacherAggregatedStats.totalVeg }} / {{ teacherAggregatedStats.totalFruit }}</p>
+             </div>
+          </div>
+          
+          <!-- 圖表區 -->
+          <div class="dopa-card border-dopa-orange p-6 relative min-h-[350px]">
+            <h3 class="text-lg font-black text-orange-800 mb-4">
+               📊 {{ teacherStudentViewMode === 'weekly' ? '當週趨勢圖' : '整月趨勢圖' }}
+               <span class="text-sm font-bold text-gray-500 ml-2">共打卡 {{ teacherAggregatedStats.days }} 天</span>
+            </h3>
+            <div class="h-[300px] w-full relative">
+              <canvas id="teacherSingleStudentChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ====== 老師視角：全班統計趨勢 ====== -->
+    <div v-else-if="currentUser.role === 'teacher' && activeTab === 'classStats'">
+      <div class="dopa-card border-dopa-purple p-6 relative overflow-hidden min-h-[400px]">
+        <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-purple-800">
+          📈 班級整體健康趨勢 <span class="text-sm font-bold text-gray-500 bg-white/50 px-2 rounded-full">(全班平均數據)</span>
+        </h3>
+        
+        <div v-if="isLoadingData" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm rounded-xl">
+          <i class="fa-solid fa-spinner fa-spin text-4xl text-dopa-purple mb-4"></i>
+          <p class="font-bold text-gray-500">正在計算全班統計...</p>
+        </div>
+
+        <div class="h-[350px] w-full relative">
+          <canvas id="classTrendChart"></canvas>
+        </div>
+        
+        <div v-if="!isLoadingData && classTrendDataLength === 0" class="absolute inset-0 z-20 flex items-center justify-center">
+          <p class="font-bold text-gray-500 bg-gray-50 px-6 py-3 rounded-2xl border-2 border-dashed border-gray-200">
+            目前班上還沒有足夠的歷史資料喔！
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 老師視角：快速新增名單 ====== -->
+    <div v-else-if="currentUser.role === 'teacher' && activeTab === 'manageStudents'">
+      <div class="dopa-card border-dopa-pink p-6">
+         <h3 class="text-xl font-black flex items-center gap-2 mb-4 text-pink-800">
+          📝 快速新增學生名單
+        </h3>
+        <p class="text-sm font-bold text-gray-500 mb-4">請在下方貼上學生的「學號」與「姓名」，每一行一位學生，中間用空白或逗號隔開。<br>(系統會自動設定預設密碼為 1234，若系統已有該學號則會自動略過)</p>
+        <textarea v-model="batchStudentText" rows="10" class="w-full p-4 bg-pink-50 border-2 border-pink-200 rounded-2xl font-bold focus:outline-none focus:border-dopa-pink resize-none mb-4 text-gray-700" placeholder="例如：&#10;112001 王小明&#10;112002 李小華&#10;112003 張大山"></textarea>
+        <button @click="submitBatchStudents" :disabled="isSaving" class="w-full py-4 bg-dopa-pink text-white font-black text-xl rounded-2xl shadow-xl hover:shadow-2xl hover:-translate-y-1 transition-all flex justify-center items-center gap-2">
+           <i class="fa-solid fa-spinner fa-spin" v-if="isSaving"></i>
+           {{ isSaving ? '處理中...' : '➕ 批次新增學生' }}
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const { createApp, ref, reactive, computed, watch, onMounted, nextTick } = Vue;
+
+  // 預設密碼參數設定區塊 (優先權最低)
+  // 👇 請將您的 GAS 網址貼在下方的雙引號 "" 裡面 👇
+  const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbx4wCbEdChxoGea2gYMx4MJv6jA4oe0PyKKkzUfPTHJJmnCuEYwx1qLGyOUcu2Z-3Ed/exec"; 
+
+  const app = createApp({
+    setup() {
+      // --- 系統狀態與設定 ---
+      const gasUrl = ref('');
+      const tempGasUrl = ref('');
+      const showSettings = ref(false);
+      const showInfo = ref(false);
+      const isGeneratingLink = ref(false);
+      const shareShortUrl = ref('');
+      const shareQrCode = ref('');
+      const gasRawCode = ref('');
+
+      // 自訂 Modal 狀態
+      const modal = reactive({ show: false, title: '', message: '', type: 'info', onConfirm: null });
+
+      const showModal = (title, message, type = 'info', onConfirm = null) => {
+        modal.title = title;
+        modal.message = message;
+        modal.type = type;
+        modal.onConfirm = onConfirm;
+        modal.show = true;
+      };
+      const modalConfirm = () => { modal.show = false; if(modal.onConfirm) modal.onConfirm(); };
+      const modalCancel = () => { modal.show = false; };
+
+      // --- 登入與使用者 ---
+      const isLoggedIn = ref(false);
+      const isLoading = ref(false);
+      const loginForm = reactive({ account: '', password: '' });
+      const currentUser = ref({ role: '', name: '', id: '' });
+
+      // --- 頁籤狀態 (依角色區分) ---
+      const studentTabs = [
+        { id: 'mar', name: '🌸 3月', color: 'bg-dopa-pink text-white' },
+        { id: 'apr', name: '🌿 4月', color: 'bg-dopa-green text-green-900' },
+        { id: 'may', name: '☀️ 5月', color: 'bg-dopa-yellow text-yellow-900' },
+        { id: 'stats', name: '📊 我的統計', color: 'bg-dopa-blue text-white' }
+      ];
+      const teacherTabs = [
+        { id: 'daily', name: '📅 班級每日狀況', color: 'bg-dopa-green text-green-900' },
+        { id: 'studentDetail', name: '👤 單一學生狀況', color: 'bg-dopa-orange text-white' },
+        { id: 'classStats', name: '📈 全班統計趨勢', color: 'bg-dopa-purple text-white' },
+        { id: 'manageStudents', name: '📝 快速新增名單', color: 'bg-dopa-pink text-white' }
+      ];
+      const activeTab = ref('mar'); // 登入後依照身分修改
+      
+      // --- 學生專屬狀態 ---
+      const selectedDate = ref('2026-03-01');
+      const currentRecord = ref(null);
+      const isSaving = ref(false);
+      const localCache = reactive({});
+      const trendDataLength = ref(0);
+
+      // --- 老師專屬狀態 ---
+      const teacherSelectedDate = ref('2026-03-01');
+      const classDailyRecords = ref([]);
+      const classTrendDataLength = ref(0);
+      const batchStudentText = ref('');
+      
+      // 單一學生專屬狀態
+      const teacherDetailMonth = ref('mar');
+      const teacherDetailDate = ref('2026-03-01');
+      const teacherSelectedStudentId = ref('');
+      const studentList = ref([]);
+      const teacherViewRecord = ref(null);
+      const teacherStudentViewMode = ref('daily'); // 'daily', 'weekly', 'monthly'
+      const teacherSelectedWeek = ref(0);
+      const teacherStudentAllStats = ref([]); // 用於週/月檢視的原始資料
+
+      const isLoadingData = ref(false);
+
+      const screenLabels = { tv: '電視', pc: '電腦', tablet: '平板', phone: '手機' };
+      const screenIcons = { tv: 'fa-tv', pc: 'fa-desktop', tablet: 'fa-tablet-screen-button', phone: 'fa-mobile-screen' };
+      
+      const showDietEncourage = ref(false);
+      const dietEncourageMsg = ref('');
+      const encourageTexts = ["Excellent! 你好棒！🌟", "太完美了！繼續保持！💖", "哇！健康達人就是你！🏆"];
+
+      // ================= 初始化與設定邏輯 =================
+      onMounted(() => {
+        gasRawCode.value = document.getElementById('gas-backend-code').textContent.trim();
+        const urlParams = new URLSearchParams(window.location.search);
+        const configBase64 = urlParams.get('config');
+        if (configBase64) {
+          try {
+            const decodedUrl = atob(configBase64);
+            gasUrl.value = decodedUrl;
+            localStorage.setItem('GAS_URL', decodedUrl);
+            window.history.replaceState({}, document.title, window.location.pathname);
+            showModal('設定成功', '已從專屬連結載入並儲存 API 設定！', 'success');
+          } catch (e) {
+            showModal('錯誤', '無效的設定參數。', 'error');
+          }
+        } else {
+          gasUrl.value = localStorage.getItem('GAS_URL') || DEFAULT_GAS_URL;
+        }
+        tempGasUrl.value = gasUrl.value;
+      });
+
+      const saveSettings = () => {
+        if (!tempGasUrl.value.includes('script.google.com/macros/')) {
+          showModal('格式錯誤', '請輸入正確的 Google Apps Script Web App 網址。', 'error');
+          return;
+        }
+        gasUrl.value = tempGasUrl.value;
+        localStorage.setItem('GAS_URL', gasUrl.value);
+        showSettings.value = false;
+        showModal('設定成功', 'API 網址已儲存！', 'success');
+      };
+
+      const clearSettings = () => {
+        showModal('確認重置', '確定要清除設定的 API 網址嗎？', 'confirm', () => {
+          localStorage.removeItem('GAS_URL');
+          gasUrl.value = '';
+          tempGasUrl.value = '';
+          showSettings.value = false;
+          window.location.reload();
+        });
+      };
+
+      const fallbackCopyTextToClipboard = (text) => {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try { document.execCommand('copy'); } catch (err) { console.error('Copy failed', err); }
+        document.body.removeChild(textArea);
+      };
+
+      const copyGasCode = () => {
+        fallbackCopyTextToClipboard(gasRawCode.value);
+        showModal('複製成功', 'GAS 程式碼已複製，請前往 Google Apps Script 貼上部署。', 'success');
+      };
+
+      // 安全降落機制的短網址與 QR Code 產生
+      const generateShareLink = async () => {
+        if(!gasUrl.value) return;
+        
+        // 取得目前的乾淨網址 (過濾掉已有的參數)
+        let baseUrl = window.location.href.split('?')[0].split('#')[0];
+        
+        // 🚨 關鍵防呆：阻擋在 Gemini 預覽環境中產生分享連結
+        if (baseUrl.includes('usercontent.goog')) {
+           showModal('⚠️ 預覽環境警告', '您目前正在 AI 的「私人預覽環境」中，這裡的網址只有您自己看得到！\n\n如果直接產生 QR Code，學生手機掃描會出現「無法連上網站」。\n\n👉 請先將 index.html 檔案上傳到免費網頁空間 (例如：Netlify Drop、GitHub Pages)，從「公開的網址」開啟後，再來產生 QR Code 喔！', 'error');
+           return;
+        }
+
+        isGeneratingLink.value = true;
+        try {
+          const base64Url = btoa(gasUrl.value);
+          const longShareUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'config=' + base64Url;
+          
+          let finalUrl = longShareUrl;
+          let isShortUrlSuccess = false;
+
+          try {
+            const res = await fetch(`https://is.gd/create.php?format=json&url=${encodeURIComponent(longShareUrl)}`);
+            const data = await res.json();
+            if(data.shorturl) {
+              finalUrl = data.shorturl;
+              isShortUrlSuccess = true;
+            }
+          } catch (apiErr) {
+            console.warn("短網址 API 失敗，使用完整網址作為替代方案。");
+          }
+          
+          shareShortUrl.value = finalUrl;
+          // 使用 ecLevel=L 降低複雜度，讓長網址也能掃描
+          shareQrCode.value = `https://quickchart.io/qr?text=${encodeURIComponent(finalUrl)}&size=300&margin=2&ecLevel=L`;
+          fallbackCopyTextToClipboard(finalUrl);
+
+          if (!isShortUrlSuccess) {
+            showModal('產生提示', '短網址服務暫時忙碌，已自動為您產生「完整網址」與專屬 QR Code！(網址已為您複製)', 'info');
+          }
+
+        } catch (err) {
+          showModal('產生失敗', '無法產生分享連結，請確認網址格式是否正確。', 'error');
+        } finally {
+          isGeneratingLink.value = false;
+        }
+      };
+
+      const apiCall = async (payload) => {
+        if (!gasUrl.value) throw new Error('未設定 API 網址');
+        const response = await fetch(gasUrl.value, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        return await response.json();
+      };
+
+      const login = async () => {
+        if (!gasUrl.value) { showSettings.value = true; return; }
+        isLoading.value = true;
+        try {
+          const res = await apiCall({ action: 'login', account: loginForm.account, password: loginForm.password });
+          if (res.success) {
+            currentUser.value = res.user;
+            isLoggedIn.value = true;
+            if (res.user.role === 'teacher') {
+              activeTab.value = 'daily';
+              fetchClassDailyData();
+              fetchStudentList();
+            } else {
+              activeTab.value = 'mar';
+              selectDate(selectedDate.value);
+            }
+          } else {
+            showModal('登入失敗', res.message, 'error');
+          }
+        } catch (e) {
+          showModal('連線失敗', '無法連接到伺服器，請檢查網路或 API 設定。', 'error');
+        } finally {
+          setTimeout(()=> isLoading.value = false, 300);
+        }
+      };
+
+      const logout = () => {
+        isLoggedIn.value = false;
+        loginForm.password = '';
+        currentRecord.value = null;
+        classDailyRecords.value = [];
+        for (const key in localCache) { delete localCache[key]; }
+      };
+
+      const calcDuration = (start, end) => {
+        if (!start || !end || start.includes('T') || end.includes('T')) return '尚未填寫';
+        let s = new Date(`2000-01-01T${start}`); let e = new Date(`2000-01-01T${end}`);
+        if (isNaN(s.getTime()) || isNaN(e.getTime())) return '時間格式錯誤';
+        if (e < s) e = new Date(`2000-01-02T${end}`);
+        const diff = e - s; return `${Math.floor(diff/3600000)}小時${Math.floor((diff%3600000)/60000)}分`;
+      };
+
+      // ================= 學生專區 =================
+      const getEmptyRecord = () => ({
+        diet: { breakfast: { veg: 0, fruit: 0 }, lunch: { veg: 0, fruit: 0 }, dinner: { veg: 0, fruit: 0 } },
+        dietCompleted: false, exerciseCompleted: false, screenCompleted: false,
+        sleep: { start: '22:00', end: '06:30', cantSleepNote: '', sleptWellNote: '' },
+        exercises: [{ type: '', duration: null }],
+        screen: { tv: '', pc: '', tablet: '', phone: '' },
+        water: Array(12).fill(false), moodText: '', photoBase64: ''
+      });
+
+      const daysInActiveMonth = computed(() => {
+        if (currentUser.value.role !== 'student') return [];
+        const year = 2026;
+        const monthMap = { mar: 3, apr: 4, may: 5 };
+        const month = monthMap[activeTab.value];
+        if (!month) return [];
+        const days = new Date(year, month, 0).getDate();
+        const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+        return Array.from({length: days}, (_, i) => {
+          const d = new Date(year, month - 1, i + 1);
+          return { date: `${year}-${String(month).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`, dayNum: i + 1, weekName: weekNames[d.getDay()] };
+        });
+      });
+
+      watch(activeTab, (newTab) => {
+        if (currentUser.value.role === 'student') {
+          if (newTab === 'stats') {
+            fetchTrendData();
+          } else {
+            const prefix = { mar: '-03-01', apr: '-04-01', may: '-05-01' }[newTab];
+            if (prefix) selectDate('2026' + prefix);
+          }
+        } else if (currentUser.value.role === 'teacher') {
+          if (newTab === 'daily') fetchClassDailyData();
+          if (newTab === 'classStats') fetchClassTrendData();
+          if (newTab === 'studentDetail') {
+             if (studentList.value.length === 0) {
+                fetchStudentList().then(() => fetchTeacherStudentDetailData());
+             } else {
+                fetchTeacherStudentDetailData();
+             }
+          }
+        }
+      });
+
+      const selectDate = async (date) => {
+        selectedDate.value = date;
+        showDietEncourage.value = false;
+        if (localCache[date]) { currentRecord.value = JSON.parse(JSON.stringify(localCache[date])); return; }
+
+        isLoadingData.value = true;
+        try {
+          const res = await apiCall({ action: 'getRecord', userId: currentUser.value.id, date: date });
+          if (res.success && res.record) {
+            currentRecord.value = res.record;
+            let parsedWater = Array(12).fill(false);
+            if (res.record.water) {
+              if (typeof res.record.water === 'string' && res.record.water.includes(',')) {
+                parsedWater = res.record.water.split(',').map(x => x === 'true');
+              } else {
+                const count = Number(res.record.water) || 0;
+                parsedWater = Array.from({length: 12}, (_, i) => i < count);
+              }
+            }
+            currentRecord.value.water = parsedWater;
+            currentRecord.value.dietCompleted = false;
+            currentRecord.value.exerciseCompleted = false;
+            currentRecord.value.screenCompleted = false;
+            localCache[date] = JSON.parse(JSON.stringify(currentRecord.value));
+          } else {
+            currentRecord.value = getEmptyRecord();
+          }
+        } catch (e) {
+          showModal('讀取失敗', '無法讀取紀錄', 'error');
+          currentRecord.value = getEmptyRecord();
+        } finally {
+          isLoadingData.value = false;
+        }
+      };
+
+      const fetchTrendData = async () => {
+        isLoadingData.value = true;
+        try {
+          const res = await apiCall({ action: 'getStudentStats', userId: currentUser.value.id });
+          if (res.success) {
+            trendDataLength.value = res.stats.length;
+            if (res.stats.length > 0) renderStudentChart(res.stats);
+          }
+        } catch (e) { showModal('讀取失敗', '無法取得統計資料', 'error'); } 
+        finally { isLoadingData.value = false; }
+      };
+
+      const renderStudentChart = (data) => {
+        nextTick(() => {
+          setTimeout(() => {
+            const ctx = document.getElementById('studentTrendChart');
+            if (!ctx) return;
+            if (window.trendChartInstance) window.trendChartInstance.destroy();
+
+            const recentData = data.slice(-14);
+            const labels = recentData.map(d => { const dt = new Date(d.date); return `${dt.getMonth() + 1}/${dt.getDate()}`; });
+            
+            window.trendChartInstance = new Chart(ctx, {
+              type: 'bar',
+              data: {
+                labels: labels,
+                datasets: [
+                  { type: 'line', label: '運動時間 (分鐘)', data: recentData.map(d=>d.exercise), borderColor: '#FFB347', backgroundColor: '#FFB347', borderWidth: 3, tension: 0.3, yAxisID: 'y1', pointBackgroundColor: '#FFF' },
+                  { type: 'bar', label: '喝水量 (cc)', data: recentData.map(d=>d.water), backgroundColor: '#A9DEF9', borderRadius: 4, yAxisID: 'y' }
+                ]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                  y: { beginAtZero: true, type: 'linear', position: 'left', title: { display: true, text: '喝水量 (cc)', color: '#A9DEF9', font: { weight: 'bold' } } },
+                  y1: { beginAtZero: true, type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '運動 (分鐘)', color: '#FFB347', font: { weight: 'bold' } } }
+                },
+                plugins: { legend: { labels: { font: { family: "'Noto Sans TC', sans-serif", weight: 'bold' } } } }
+              }
+            });
+          }, 100);
+        });
+      };
+
+      const totalVeg = computed(() => { if (!currentRecord.value) return 0; const d = currentRecord.value.diet; return Number(d.breakfast.veg) + Number(d.lunch.veg) + Number(d.dinner.veg); });
+      const totalFruit = computed(() => { if (!currentRecord.value) return 0; const d = currentRecord.value.diet; return Number(d.breakfast.fruit) + Number(d.lunch.fruit) + Number(d.dinner.fruit); });
+      const totalExerciseDuration = computed(() => { if (!currentRecord.value) return 0; return currentRecord.value.exercises.reduce((sum, ex) => sum + (Number(ex.duration) || 0), 0); });
+      const totalScreenTime = computed(() => { if (!currentRecord.value) return 0; const s = currentRecord.value.screen; return (Number(s.tv) || 0) + (Number(s.pc) || 0) + (Number(s.tablet) || 0) + (Number(s.phone) || 0); });
+      const isScreenFullyFilled = computed(() => { if (!currentRecord.value) return false; const s = currentRecord.value.screen; return s.tv !== '' && s.tv !== null && s.pc !== '' && s.pc !== null && s.tablet !== '' && s.tablet !== null && s.phone !== '' && s.phone !== null; });
+      const waterCount = computed(() => { if (!currentRecord.value || !Array.isArray(currentRecord.value.water)) return 0; return currentRecord.value.water.filter(Boolean).length; });
+
+      const checkDietGoal = () => {
+        if (totalVeg.value >= 3 && totalFruit.value >= 2) {
+          if (!currentRecord.value.dietCompleted) {
+            currentRecord.value.dietCompleted = true;
+            confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 }, colors: ['#98DDCA', '#FFB347', '#FFA6D9'] });
+            dietEncourageMsg.value = encourageTexts[Math.floor(Math.random() * encourageTexts.length)];
+            showDietEncourage.value = true;
+          }
+        } else { currentRecord.value.dietCompleted = false; showDietEncourage.value = false; }
+      };
+
+      const checkExerciseGoal = () => {
+        if (totalExerciseDuration.value >= 60) {
+          if (!currentRecord.value.exerciseCompleted) {
+            currentRecord.value.exerciseCompleted = true;
+            confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#FFB347', '#FFA6D9', '#FFE066'] });
+            setTimeout(() => { confetti({ particleCount: 150, spread: 100, origin: { y: 0.5 }, colors: ['#98DDCA', '#A9DEF9'] }); }, 300);
+          }
+        } else { currentRecord.value.exerciseCompleted = false; }
+      };
+
+      const checkScreenGoal = () => {
+        if (isScreenFullyFilled.value && totalScreenTime.value <= 120) {
+          if (!currentRecord.value.screenCompleted) {
+            currentRecord.value.screenCompleted = true;
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.5 }, colors: ['#A9DEF9', '#D4B2D8', '#FFFFFF'] });
+          }
+        } else { currentRecord.value.screenCompleted = false; }
+      };
+
+      const calculateSleepDuration = () => calcDuration(currentRecord.value?.sleep?.start, currentRecord.value?.sleep?.end);
+
+      const addExercise = () => { if (currentRecord.value.exercises.length < 7) currentRecord.value.exercises.push({ type: '', duration: null }); };
+      const toggleWater = (index) => {
+        const prev = waterCount.value; currentRecord.value.water[index] = !currentRecord.value.water[index];
+        if (waterCount.value >= 6 && prev < 6) confetti({ particleCount: 100, spread: 80, origin: { y: 0.8 }, colors: ['#A9DEF9', '#80E5FF', '#FFFFFF'] });
+      };
+
+      const handleImageUpload = (e) => {
+        const file = e.target.files[0]; 
+        if (!file || !file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas'); 
+            let w = img.width, h = img.height;
+            const maxDim = 400; 
+            if (w > maxDim || h > maxDim) {
+              if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+              else { w = Math.round((w * maxDim) / h); h = maxDim; }
+            }
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d'); 
+            ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+            let quality = 0.7; let base64Str = canvas.toDataURL('image/jpeg', quality);
+            while (base64Str.length > 45000 && quality > 0.1) { quality -= 0.1; base64Str = canvas.toDataURL('image/jpeg', quality); }
+            if (base64Str.length > 50000) {
+              showModal('圖片太複雜', '這張照片色彩太豐富了，壓縮後還是放不進日記本喔！請換一張簡單一點的照片。', 'error');
+              currentRecord.value.photoBase64 = '';
+            } else { currentRecord.value.photoBase64 = base64Str; }
+          }; img.src = ev.target.result;
+        }; reader.readAsDataURL(file);
+      };
+
+      const saveData = async () => {
+        isSaving.value = true;
+        try {
+          const recordToSave = JSON.parse(JSON.stringify(currentRecord.value));
+          recordToSave.water = currentRecord.value.water.join(',');
+          const res = await apiCall({ action: 'saveRecord', userId: currentUser.value.id, date: selectedDate.value, record: recordToSave });
+          if (res.success) {
+            localCache[selectedDate.value] = JSON.parse(JSON.stringify(currentRecord.value));
+            showModal('儲存成功', '今天的紀錄已好好收進抽屜囉！✨', 'success');
+          } else { throw new Error(res.message); }
+        } catch (e) { showModal('儲存失敗', e.message || '連線發生錯誤', 'error'); } 
+        finally { isSaving.value = false; }
+      };
+
+      // ================= 老師專區 =================
+      const fetchClassDailyData = async () => {
+        isLoadingData.value = true;
+        try {
+          const res = await apiCall({ action: 'getClassData', date: teacherSelectedDate.value });
+          if (res.success) classDailyRecords.value = res.list;
+        } catch (e) { showModal('讀取失敗', '無法取得班級每日資料', 'error'); } 
+        finally { isLoadingData.value = false; }
+      };
+
+      const fetchClassTrendData = async () => {
+        isLoadingData.value = true;
+        try {
+          const res = await apiCall({ action: 'getClassStats' });
+          if (res.success) {
+            classTrendDataLength.value = res.stats.length;
+            if (res.stats.length > 0) renderClassChart(res.stats);
+          }
+        } catch (e) { showModal('讀取失敗', '無法取得全班統計趨勢', 'error'); } 
+        finally { isLoadingData.value = false; }
+      };
+
+      const renderClassChart = (data) => {
+        nextTick(() => {
+          setTimeout(() => {
+            const ctx = document.getElementById('classTrendChart');
+            if (!ctx) return;
+            if (window.classChartInstance) window.classChartInstance.destroy();
+
+            const recentData = data.slice(-30); // 老師看最近30天
+            const labels = recentData.map(d => { const dt = new Date(d.date); return `${dt.getMonth() + 1}/${dt.getDate()}`; });
+            
+            window.classChartInstance = new Chart(ctx, {
+              type: 'bar',
+              data: {
+                labels: labels,
+                datasets: [
+                  { type: 'line', label: '平均運動 (分鐘)', data: recentData.map(d=>d.avgExercise), borderColor: '#FFB347', backgroundColor: '#FFB347', borderWidth: 3, tension: 0.3, yAxisID: 'y1' },
+                  { type: 'line', label: '平均螢幕時間 (分鐘)', data: recentData.map(d=>d.avgScreen), borderColor: '#FF9CEE', backgroundColor: '#FF9CEE', borderWidth: 3, tension: 0.3, yAxisID: 'y1' },
+                  { type: 'bar', label: '平均喝水量 (cc)', data: recentData.map(d=>d.avgWater), backgroundColor: '#A9DEF9', borderRadius: 4, yAxisID: 'y' }
+                ]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                  y: { beginAtZero: true, type: 'linear', position: 'left', title: { display: true, text: '平均喝水 (cc)', color: '#A9DEF9', font: { weight: 'bold' } } },
+                  y1: { beginAtZero: true, type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '時間 (分鐘)', color: '#FFB347', font: { weight: 'bold' } } }
+                },
+                plugins: { legend: { labels: { font: { family: "'Noto Sans TC', sans-serif", weight: 'bold' } } } }
+              }
+            });
+          }, 100);
+        });
+      };
+
+      // --- 單一學生狀況追蹤 ---
+      const fetchStudentList = async () => {
+        isLoadingData.value = true;
+        try {
+          const res = await apiCall({ action: 'getStudentList' });
+          if (res.success) {
+            studentList.value = res.list;
+            if (res.list.length > 0 && !teacherSelectedStudentId.value) {
+              teacherSelectedStudentId.value = res.list[0].id;
+              fetchTeacherStudentDetailData();
+            }
+          }
+        } catch (e) { console.error('fetch student list error', e); }
+        finally { isLoadingData.value = false; }
+      };
+
+      // --- 批次新增學生 ---
+      const submitBatchStudents = async () => {
+        if (!batchStudentText.value.trim()) {
+          showModal('錯誤提示', '請先在文字框內貼上學生的學號與姓名喔！', 'error'); return;
+        }
+        
+        const lines = batchStudentText.value.trim().split('\n');
+        const studentsToAdd = [];
+        
+        for (const line of lines) {
+          const parts = line.trim().split(/[\s,，、]+/); // 支援空白、逗號分隔
+          if (parts.length >= 2) {
+            studentsToAdd.push({ id: parts[0], name: parts[1] });
+          } else if (parts.length === 1 && parts[0]) {
+            studentsToAdd.push({ id: parts[0], name: '學生_' + parts[0] });
+          }
+        }
+
+        if (studentsToAdd.length === 0) {
+           showModal('格式錯誤', '無法解析您輸入的學生資料，請確認格式是否為「學號 姓名」', 'error'); return;
+        }
+
+        isSaving.value = true;
+        try {
+          const res = await apiCall({ action: 'addStudents', students: studentsToAdd });
+          if (res.success) {
+             showModal('新增成功', res.message, 'success');
+             batchStudentText.value = '';
+             fetchStudentList(); // 重新整理名單
+          } else { throw new Error(res.message); }
+        } catch(e) {
+           showModal('新增失敗', e.message || '連線發生錯誤', 'error');
+        } finally {
+           isSaving.value = false;
+        }
+      };
+
+      const teacherDetailDays = computed(() => {
+        if (currentUser.value.role !== 'teacher') return [];
+        const year = 2026;
+        const monthMap = { mar: 3, apr: 4, may: 5 };
+        const month = monthMap[teacherDetailMonth.value];
+        if (!month) return [];
+        const days = new Date(year, month, 0).getDate();
+        const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+        return Array.from({length: days}, (_, i) => {
+          const d = new Date(year, month - 1, i + 1);
+          return { date: `${year}-${String(month).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`, dayNum: i + 1, weekName: weekNames[d.getDay()] };
+        });
+      });
+
+      const teacherDetailWeeksList = computed(() => {
+        const year = 2026;
+        const monthMap = { mar: 3, apr: 4, may: 5 };
+        const m = monthMap[teacherDetailMonth.value];
+        if(!m) return [];
+        const days = new Date(year, m, 0).getDate();
+        let weeks = [];
+        for(let i=1; i<=days; i+=7) {
+          let end = i+6 > days ? days : i+6;
+          weeks.push({
+            label: `第 ${weeks.length + 1} 週 (${m}/${i} ~ ${m}/${end})`,
+            start: `${year}-${String(m).padStart(2,'0')}-${String(i).padStart(2,'0')}`,
+            end: `${year}-${String(m).padStart(2,'0')}-${String(end).padStart(2,'0')}`
+          });
+        }
+        return weeks;
+      });
+
+      // 依照模式自動切換要抓取的資料
+      const fetchTeacherStudentDetailData = async () => {
+        if (!teacherSelectedStudentId.value) return;
+        
+        // 若為日檢視，抓取單日明細
+        if (teacherStudentViewMode.value === 'daily') {
+          if (!teacherDetailDate.value) return;
+          isLoadingData.value = true;
+          try {
+            const res = await apiCall({ action: 'getRecord', userId: teacherSelectedStudentId.value, date: teacherDetailDate.value });
+            if (res.success && res.record) {
+              let parsedWater = Array(12).fill(false);
+              if (res.record.water) {
+                if (typeof res.record.water === 'string' && res.record.water.includes(',')) {
+                  parsedWater = res.record.water.split(',').map(x => x === 'true');
+                } else {
+                  const count = Number(res.record.water) || 0;
+                  parsedWater = Array.from({length: 12}, (_, i) => i < count);
+                }
+              }
+              res.record.water = parsedWater;
+              teacherViewRecord.value = res.record;
+            } else {
+              teacherViewRecord.value = null;
+            }
+          } catch (e) { showModal('讀取失敗', '無法讀取該學生紀錄', 'error'); teacherViewRecord.value = null; } 
+          finally { isLoadingData.value = false; }
+        } 
+        // 若為週/月檢視，抓取該生所有歷史統計資料
+        else {
+          isLoadingData.value = true;
+          try {
+            const res = await apiCall({ action: 'getStudentStats', userId: teacherSelectedStudentId.value });
+            if (res.success) {
+              teacherStudentAllStats.value = res.stats;
+            }
+          } catch(e) { console.error(e); } 
+          finally { isLoadingData.value = false; }
+        }
+      };
+
+      const selectTeacherDate = (date) => { teacherDetailDate.value = date; fetchTeacherStudentDetailData(); };
+
+      watch([teacherSelectedStudentId, teacherStudentViewMode], () => {
+        if (activeTab.value === 'studentDetail' && teacherSelectedStudentId.value) {
+          teacherSelectedWeek.value = 0; // 切換時重置週數選擇
+          fetchTeacherStudentDetailData();
+        }
+      });
+
+      watch(teacherDetailMonth, (newMonth) => {
+        if (currentUser.value.role === 'teacher' && activeTab.value === 'studentDetail') {
+          const prefix = { mar: '-03-01', apr: '-04-01', may: '-05-01' }[newMonth];
+          if (prefix) { teacherDetailDate.value = '2026' + prefix; teacherSelectedWeek.value = 0; fetchTeacherStudentDetailData(); }
+        }
+      });
+
+      // === 過濾並計算 週/月 統計資料 ===
+      const filteredTeacherStudentStats = computed(() => {
+        if (teacherStudentViewMode.value === 'monthly') {
+           const prefix = { mar: '2026-03', apr: '2026-04', may: '2026-05' }[teacherDetailMonth.value];
+           return teacherStudentAllStats.value.filter(s => s.date.startsWith(prefix));
+        } else if (teacherStudentViewMode.value === 'weekly') {
+           const week = teacherDetailWeeksList.value[teacherSelectedWeek.value];
+           if(!week) return [];
+           return teacherStudentAllStats.value.filter(s => s.date >= week.start && s.date <= week.end);
+        }
+        return [];
+      });
+
+      const teacherAggregatedStats = computed(() => {
+        const data = filteredTeacherStudentStats.value;
+        if (data.length === 0) return { days: 0, avgEx: 0, avgSc: 0, avgWater: 0, totalVeg: 0, totalFruit: 0 };
+        let ex = 0, sc = 0, water = 0, veg = 0, fruit = 0;
+        data.forEach(d => { ex+=d.exercise; sc+=d.screen; water+=d.water; veg+=d.veg; fruit+=d.fruit; });
+        return {
+          days: data.length,
+          avgEx: Math.round(ex / data.length),
+          avgSc: Math.round(sc / data.length),
+          avgWater: Math.round(water / data.length),
+          totalVeg: veg,
+          totalFruit: fruit
+        };
+      });
+
+      // 監聽並重繪週/月圖表
+      watch([filteredTeacherStudentStats, teacherStudentViewMode], () => {
+        if (activeTab.value === 'studentDetail' && (teacherStudentViewMode.value === 'weekly' || teacherStudentViewMode.value === 'monthly')) {
+           const data = filteredTeacherStudentStats.value;
+           if (data.length > 0) {
+             nextTick(() => {
+                setTimeout(() => {
+                  const ctx = document.getElementById('teacherSingleStudentChart');
+                  if (!ctx) return;
+                  if (window.teacherSingleStudentChartInstance) window.teacherSingleStudentChartInstance.destroy();
+                  const labels = data.map(d => { const dt = new Date(d.date); return `${dt.getMonth() + 1}/${dt.getDate()}`; });
+                  window.teacherSingleStudentChartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                      labels: labels,
+                      datasets: [
+                        { type: 'line', label: '運動時間 (分鐘)', data: data.map(d=>d.exercise), borderColor: '#FFB347', backgroundColor: '#FFB347', borderWidth: 3, tension: 0.3, yAxisID: 'y1' },
+                        { type: 'line', label: '螢幕時間 (分鐘)', data: data.map(d=>d.screen), borderColor: '#FF9CEE', backgroundColor: '#FF9CEE', borderWidth: 3, tension: 0.3, yAxisID: 'y1' },
+                        { type: 'bar', label: '喝水量 (cc)', data: data.map(d=>d.water), backgroundColor: '#A9DEF9', borderRadius: 4, yAxisID: 'y' }
+                      ]
+                    },
+                    options: {
+                      responsive: true, maintainAspectRatio: false,
+                      scales: {
+                        y: { beginAtZero: true, type: 'linear', position: 'left', title: { display: true, text: '喝水 (cc)', color: '#A9DEF9', font: { weight: 'bold' } } },
+                        y1: { beginAtZero: true, type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '時間 (分)', color: '#FFB347', font: { weight: 'bold' } } }
+                      },
+                      plugins: { legend: { labels: { font: { family: "'Noto Sans TC', sans-serif", weight: 'bold' } } } }
+                    }
+                  });
+                }, 100);
+             });
+           }
+        }
+      });
+
+      const teacherTotalVeg = computed(() => { if (!teacherViewRecord.value) return 0; const d = teacherViewRecord.value.diet; return Number(d.breakfast.veg) + Number(d.lunch.veg) + Number(d.dinner.veg); });
+      const teacherTotalFruit = computed(() => { if (!teacherViewRecord.value) return 0; const d = teacherViewRecord.value.diet; return Number(d.breakfast.fruit) + Number(d.lunch.fruit) + Number(d.dinner.fruit); });
+      const teacherTotalExercise = computed(() => { if (!teacherViewRecord.value) return 0; return teacherViewRecord.value.exercises.reduce((sum, ex) => sum + (Number(ex.duration) || 0), 0); });
+      const teacherTotalScreen = computed(() => { if (!teacherViewRecord.value) return 0; const s = teacherViewRecord.value.screen; return (Number(s.tv) || 0) + (Number(s.pc) || 0) + (Number(s.tablet) || 0) + (Number(s.phone) || 0); });
+      const teacherWaterCount = computed(() => { if (!teacherViewRecord.value || !Array.isArray(teacherViewRecord.value.water)) return 0; return teacherViewRecord.value.water.filter(Boolean).length; });
+
+      return {
+        gasUrl, tempGasUrl, showSettings, showInfo, isGeneratingLink, shareShortUrl, shareQrCode, gasRawCode,
+        saveSettings, clearSettings, copyGasCode, generateShareLink,
+        modal, showModal, modalConfirm, modalCancel,
+        isLoggedIn, isLoading, loginForm, currentUser, login, logout, calcDuration,
+        studentTabs, teacherTabs, activeTab, selectedDate, daysInActiveMonth, selectDate,
+        currentRecord, isLoadingData, isSaving, localCache, trendDataLength,
+        teacherSelectedDate, classDailyRecords, classTrendDataLength, fetchClassDailyData,
+        teacherDetailMonth, teacherDetailDate, teacherSelectedStudentId, studentList, teacherViewRecord, teacherDetailDays, selectTeacherDate,
+        teacherTotalVeg, teacherTotalFruit, teacherTotalExercise, teacherTotalScreen, teacherWaterCount,
+        teacherStudentViewMode, teacherSelectedWeek, teacherDetailWeeksList, teacherAggregatedStats, fetchStudentList, batchStudentText, submitBatchStudents,
+        screenLabels, screenIcons, showDietEncourage, dietEncourageMsg, totalVeg, totalFruit, totalExerciseDuration, totalScreenTime, isScreenFullyFilled, waterCount,
+        checkDietGoal, checkExerciseGoal, checkScreenGoal, calculateSleepDuration, addExercise, toggleWater, handleImageUpload, saveData
+      };
+    }
+  });
+
+  app.mount('#app');
+</script>
+</body>
+</html>
